@@ -190,10 +190,11 @@ export default function OrdersPage() {
                     <td className="px-5 py-3">
                       <select
                         value={order.status}
+                        disabled={["DELIVERED", "SUCCESS", "CANCELLED"].includes(order.status)}
                         onChange={(e) =>
                           updateStatusMutation.mutate({ id: order.id, status: e.target.value })
                         }
-                        className="form-input py-1 px-2 text-xs w-full"
+                        className="form-input py-1 px-2 text-xs w-full disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {ORDER_STATUSES.map((s) => (
                           <option key={s} value={s}>

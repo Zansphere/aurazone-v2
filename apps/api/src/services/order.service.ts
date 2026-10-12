@@ -288,6 +288,14 @@ export async function updateOrderStatus(id: string, status: string, adminId?: st
   if (!order) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
   if (order.status === status) return order;
 
+  if (order.status === "DELIVERED" || order.status === "SUCCESS") {
+    throw Object.assign(new Error("Cannot change status of an already delivered order"), { statusCode: 400 });
+  }
+
+  if (order.status === "CANCELLED") {
+    throw Object.assign(new Error("Cannot change status of a cancelled order"), { statusCode: 400 });
+  }
+
   const updated = await prisma.$transaction(async (tx) => {
     const updatedOrder = await tx.order.update({ where: { id }, data: { status: status as any }, include: { user: true } });
     

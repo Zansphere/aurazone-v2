@@ -80,8 +80,9 @@ export default function OrderDetailPage() {
             </span>
             <select
               value={order.status}
+              disabled={["DELIVERED", "SUCCESS", "CANCELLED"].includes(order.status)}
               onChange={(e) => updateStatusMutation.mutate(e.target.value)}
-              className="form-input py-1.5 px-3 text-xs w-36"
+              className="form-input py-1.5 px-3 text-xs w-36 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {ORDER_STATUSES.map((s) => (
                 <option key={s} value={s}>{s.charAt(0) + s.slice(1).toLowerCase()}</option>

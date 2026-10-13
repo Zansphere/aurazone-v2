@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { MapPin, Plus, CreditCard, Lock, ChevronRight, Tag } from "lucide-react";
@@ -13,6 +13,7 @@ import { useCartStore } from "@/stores/cart.store";
 
 export default function CheckoutPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { isAuthenticated, isLoading: isAuthLoading } = useAuthStore();
 
   useEffect(() => {
@@ -27,6 +28,7 @@ export default function CheckoutPage() {
   const [couponCode, setCouponCode] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [couponError, setCouponError] = useState("");
+  const [isPaymentGatewayOpen, setIsPaymentGatewayOpen] = useState(false);
 
   const [addressForm, setAddressForm] = useState({
     name: "", phone: "", addressLine1: "", addressLine2: "",
@@ -50,9 +52,14 @@ export default function CheckoutPage() {
   const verifyPaymentMutation = useMutation({
     mutationFn: (data: any) => api.post("/payments/verify", data),
     onSuccess: (res: any, variables: any) => {
+      setIsPaymentGatewayOpen(false);
+      useCartStore.setState({ cart: null });
+      queryClient.invalidateQueries({ queryKey: ["cart"] });
+      fetchCart();
       router.push(`/order-confirmation/${variables.trackingToken}`);
     },
     onError: (err: any) => {
+      setIsPaymentGatewayOpen(false);
       alert("Payment verification failed: " + err.message);
     }
   });
@@ -60,6 +67,9 @@ export default function CheckoutPage() {
   const createPaymentMutation = useMutation({
     mutationFn: (data: { orderId: string }) => api.post<any>("/payments/create", data),
     onSuccess: (res, variables) => {
+      setIsPaymentGatewayOpen(true);
+      let paymentCompleted = false;
+
       const options = {
         key: res.data.keyId,
         amount: res.data.amount,
@@ -68,6 +78,7 @@ export default function CheckoutPage() {
         description: `Order ${res.data.orderNumber}`,
         order_id: res.data.razorpayOrderId,
         handler: function (response: any) {
+          paymentCompleted = true;
           verifyPaymentMutation.mutate({
             razorpayOrderId: response.razorpay_order_id,
             razorpayPaymentId: response.razorpay_payment_id,
@@ -85,15 +96,19 @@ export default function CheckoutPage() {
         },
         modal: {
           ondismiss: function () {
-            api.post(`/orders/${variables.orderId}/fail-payment`)
-              .then(() => fetchCart())
-              .catch(console.error);
+            setIsPaymentGatewayOpen(false);
+            if (!paymentCompleted) {
+              api.post(`/orders/${variables.orderId}/fail-payment`)
+                .then(() => fetchCart())
+                .catch(console.error);
+            }
           }
         }
       };
 
       const rzp = new (window as any).Razorpay(options);
       rzp.on('payment.failed', function (response: any) {
+        setIsPaymentGatewayOpen(false);
         api.post(`/orders/${variables.orderId}/fail-payment`)
           .then(() => fetchCart())
           .catch(console.error);
@@ -102,13 +117,14 @@ export default function CheckoutPage() {
       rzp.open();
     },
     onError: (err: any) => {
+      setIsPaymentGatewayOpen(false);
       alert("Failed to initialize payment gateway: " + err.message);
     }
   });
 
   const placeOrderMutation = useMutation({
     mutationFn: (data: any) =>
-      api.post<{ order: { id: string, trackingToken: string } }>("/orders", data),
+      api.post<{ id: string; trackingToken: string }>("/orders", data),
     onSuccess: (res) => {
       const order = res.data;
       if (!order || !order.id) return;
@@ -116,9 +132,15 @@ export default function CheckoutPage() {
       if (paymentMethod === "RAZORPAY") {
         createPaymentMutation.mutate({ orderId: order.id, trackingToken: order.trackingToken } as any);
       } else {
+        useCartStore.setState({ cart: null });
+        queryClient.invalidateQueries({ queryKey: ["cart"] });
+        fetchCart();
         router.push(`/order-confirmation/${order.trackingToken}`);
       }
     },
+    onError: () => {
+      setIsPaymentGatewayOpen(false);
+    }
   });
 
   const addresses = addressData?.data ?? [];
@@ -197,7 +219,7 @@ export default function CheckoutPage() {
     );
   }
 
-  const isProcessing = placeOrderMutation.isPending || createPaymentMutation.isPending || verifyPaymentMutation.isPending;
+  const isProcessing = placeOrderMutation.isPending || createPaymentMutation.isPending || verifyPaymentMutation.isPending || isPaymentGatewayOpen;
 
   return (
     <>

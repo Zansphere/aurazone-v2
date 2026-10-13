@@ -128,12 +128,25 @@ export async function createOrderFromCart(
     });
     const storeMap = Object.fromEntries(stores.map((s) => [s.id, s.name]));
 
+    let validSessionId: string | null = null;
+    if (!userId) {
+      const candidateId = cart.sessionId ?? sessionId;
+      if (candidateId) {
+        const guestSession = await tx.guestSession.findFirst({
+          where: {
+            OR: [{ id: candidateId }, { sessionId: candidateId }],
+          },
+        });
+        validSessionId = guestSession?.id ?? null;
+      }
+    }
+
     const newOrder = await tx.order.create({
       data: {
         orderNumber,
         trackingToken,
         userId: userId ?? null,
-        sessionId: sessionId ?? null,
+        sessionId: validSessionId,
         status: "PENDING",
         paymentStatus: "PENDING",
         paymentMethod,

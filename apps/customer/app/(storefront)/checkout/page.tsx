@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { MapPin, Plus, CreditCard, Lock, ChevronRight, Tag } from "lucide-react";
+import { MapPin, Plus, CreditCard, Lock, ChevronRight, Tag, Truck } from "lucide-react";
 import Link from "next/link";
 import Script from "next/script";
 
@@ -16,13 +16,10 @@ export default function CheckoutPage() {
   const queryClient = useQueryClient();
   const { isAuthenticated, isLoading: isAuthLoading } = useAuthStore();
 
-  useEffect(() => {
-    if (!isAuthLoading && !isAuthenticated) {
-      router.push("/login?redirect=/checkout");
-    }
-  }, [isAuthLoading, isAuthenticated, router]);
   const [selectedAddressId, setSelectedAddressId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("COD");
+  const [deliveryOption, setDeliveryOption] = useState<"standard" | "express">("standard");
+  const [orderNotes, setOrderNotes] = useState("");
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [guestEmail, setGuestEmail] = useState("");
   const [couponCode, setCouponCode] = useState("");
@@ -159,8 +156,9 @@ export default function CheckoutPage() {
   }
   
   const discountedSubtotal = subtotal - discount;
-  const deliveryFee = discountedSubtotal >= 499 ? 0 : 49;
+  const deliveryFee = deliveryOption === "express" ? 99 : (discountedSubtotal >= 499 ? 0 : 49);
   const total = discountedSubtotal + deliveryFee;
+  const estimatedTax = Math.round(total - (total / 1.18)); // 18% inclusive GST
 
   const isGuest = !isAuthenticated;
   const showAddressForm = isGuest || isAddingNew || addresses.length === 0;
@@ -170,7 +168,10 @@ export default function CheckoutPage() {
     : !!selectedAddressId;
 
   const handlePlaceOrder = () => {
-    const data: any = { paymentMethod };
+    const data: any = { 
+      paymentMethod,
+      notes: orderNotes.trim() ? `[Delivery: ${deliveryOption.toUpperCase()}] ${orderNotes.trim()}` : `[Delivery: ${deliveryOption.toUpperCase()}]`
+    };
     if (appliedCoupon) data.couponCode = appliedCoupon.code;
     
     if (showAddressForm) {
@@ -200,7 +201,7 @@ export default function CheckoutPage() {
     }
   };
 
-  if (isCartLoading || isAuthLoading || !isAuthenticated) {
+  if (isCartLoading || isAuthLoading) {
     return (
       <div className="section-container py-16 text-center flex justify-center">
         <div className="animate-spin h-8 w-8 border-4 border-[var(--color-primary)] border-t-transparent rounded-full"></div>
@@ -211,6 +212,13 @@ export default function CheckoutPage() {
   if (items.length === 0) {
     return (
       <div className="section-container py-16 text-center">
+        <p className="text-lg font-semibold text-[var(--color-text-primary)]">Your cart is empty</p>
+        <Link href="/products" className="mt-4 inline-flex rounded-xl bg-[var(--color-primary)] px-6 py-3 text-sm font-semibold text-white">
+          Continue Shopping
+        </Link>
+      </div>
+    );
+  }
         <p className="text-lg font-semibold text-[var(--color-text-primary)]">Your cart is empty</p>
         <Link href="/products" className="mt-4 inline-flex rounded-xl bg-[var(--color-primary)] px-6 py-3 text-sm font-semibold text-white">
           Continue Shopping
@@ -289,6 +297,67 @@ export default function CheckoutPage() {
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Delivery Speed / Shipping Options */}
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-5">
+              <h2 className="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2 mb-4">
+                <Truck size={16} /> Delivery Speed & Timeframe
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeliveryOption("standard")}
+                  className={`text-left rounded-xl border p-4 transition-all ${
+                    deliveryOption === "standard"
+                      ? "border-[var(--color-accent)] bg-[var(--color-accent-light)] ring-2 ring-[var(--color-accent)]/20"
+                      : "border-[var(--color-border)] hover:border-[var(--color-border-strong)]"
+                  }`}
+                >
+                  <div className="flex justify-between items-start">
+                    <span className="text-sm font-bold text-[var(--color-text-primary)]">Standard Delivery</span>
+                    <span className="text-xs font-semibold text-emerald-600">
+                      {discountedSubtotal >= 499 ? "FREE" : "₹49"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[var(--color-text-secondary)] mt-1">Est. 3–5 business days</p>
+                  <p className="text-[11px] text-[var(--color-text-tertiary)] mt-2">Reliable surface delivery</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeliveryOption("express")}
+                  className={`text-left rounded-xl border p-4 transition-all ${
+                    deliveryOption === "express"
+                      ? "border-[var(--color-accent)] bg-[var(--color-accent-light)] ring-2 ring-[var(--color-accent)]/20"
+                      : "border-[var(--color-border)] hover:border-[var(--color-border-strong)]"
+                  }`}
+                >
+                  <div className="flex justify-between items-start">
+                    <span className="text-sm font-bold text-[var(--color-text-primary)]">Express Delivery</span>
+                    <span className="text-xs font-semibold text-[var(--color-accent)]">₹99</span>
+                  </div>
+                  <p className="text-xs text-[var(--color-text-secondary)] mt-1">Est. 1–2 business days</p>
+                  <p className="text-[11px] text-[var(--color-text-tertiary)] mt-2">Priority air courier dispatch</p>
+                </button>
+              </div>
+            </div>
+
+            {/* Delivery Instructions / Order Notes */}
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-5">
+              <h2 className="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2 mb-2">
+                Delivery Instructions (Optional)
+              </h2>
+              <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+                Provide landmark, gate code, or specific drop-off instructions.
+              </p>
+              <textarea
+                value={orderNotes}
+                onChange={(e) => setOrderNotes(e.target.value)}
+                placeholder="E.g. Ring the bell twice, leave with security at tower B..."
+                rows={2}
+                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] p-3 text-sm outline-none resize-none focus:border-[var(--color-accent)]"
+              />
             </div>
 
             {/* Payment Method */}
@@ -374,13 +443,24 @@ export default function CheckoutPage() {
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-[var(--color-text-secondary)]">Delivery</span>
+                  <span className="text-[var(--color-text-secondary)]">Delivery ({deliveryOption === "express" ? "Express" : "Standard"})</span>
                   <span className="font-medium text-emerald-600">{deliveryFee === 0 ? "Free" : `₹${deliveryFee}`}</span>
+                </div>
+                <div className="flex justify-between text-xs text-[var(--color-text-tertiary)] pt-1">
+                  <span>Included GST (18%)</span>
+                  <span>₹{estimatedTax.toLocaleString()}</span>
                 </div>
                 <div className="pt-3 mt-3 border-t border-[var(--color-border)] flex justify-between text-base font-bold">
                   <span>Total</span>
                   <span>{"\u20B9"}{total.toLocaleString()}</span>
                 </div>
+              </div>
+
+              <div className="mt-3 p-2.5 rounded-lg bg-emerald-50 border border-emerald-100 text-[11px] text-emerald-800 flex items-center gap-2">
+                <Truck size={14} className="shrink-0 text-emerald-600" />
+                <span>
+                  Estimated delivery: <strong>{deliveryOption === "express" ? "Tomorrow / Day after (1–2 days)" : "Within 3–5 days"}</strong>
+                </span>
               </div>
 
               <button

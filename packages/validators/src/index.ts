@@ -118,7 +118,7 @@ export const productVariantSchema = z.object({
   compareAtPrice: z.number().positive().optional().nullable(),
   isAvailable: z.boolean().default(true),
   attributes: z.array(productVariantAttributeSchema),
-  quantity: z.number().int().min(0).default(0),
+  quantity: z.number().int().min(1, "Stock quantity must be at least 1").default(1),
   images: z.array(z.any()).optional(),
 });
 

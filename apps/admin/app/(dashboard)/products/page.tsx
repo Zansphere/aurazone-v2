@@ -23,6 +23,7 @@ interface Product {
     price: number;
     compareAtPrice: number | null;
     images: Array<{ url: string }>;
+    inventory?: { quantity: number; reserved?: number } | null;
   }>;
   _count: { variants: number };
 }
@@ -115,105 +116,152 @@ export default function ProductsPage() {
                 Price
               </th>
               <th className="px-5 py-3 text-center text-xs font-semibold text-[var(--color-text-tertiary)] uppercase tracking-wider">
-                Variants
+                Stock (Overall Qty)
               </th>
               <th className="px-5 py-3 text-center text-xs font-semibold text-[var(--color-text-tertiary)] uppercase tracking-wider">
                 Status
               </th>
-              <th className="px-5 py-3 w-24" />
+              <th className="px-5 py-3 w-28 text-right text-xs font-semibold text-[var(--color-text-tertiary)] uppercase tracking-wider">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--color-border)]">
             {isLoading
               ? Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i}>
-                    <td className="px-5 py-3"><div className="w-40 h-4 shimmer rounded" /></td>
-                    <td className="px-5 py-3"><div className="w-20 h-4 shimmer rounded" /></td>
-                    <td className="px-5 py-3"><div className="w-24 h-4 shimmer rounded" /></td>
-                    <td className="px-5 py-3"><div className="w-16 h-4 shimmer rounded ml-auto" /></td>
-                    <td className="px-5 py-3"><div className="w-8 h-4 shimmer rounded mx-auto" /></td>
-                    <td className="px-5 py-3"><div className="w-14 h-5 shimmer rounded-full mx-auto" /></td>
-                    <td className="px-5 py-3" />
-                  </tr>
-                ))
+                <tr key={i}>
+                  <td className="px-5 py-3"><div className="w-40 h-4 shimmer rounded" /></td>
+                  <td className="px-5 py-3"><div className="w-20 h-4 shimmer rounded" /></td>
+                  <td className="px-5 py-3"><div className="w-24 h-4 shimmer rounded" /></td>
+                  <td className="px-5 py-3"><div className="w-16 h-4 shimmer rounded ml-auto" /></td>
+                  <td className="px-5 py-3"><div className="w-20 h-5 shimmer rounded mx-auto" /></td>
+                  <td className="px-5 py-3"><div className="w-14 h-5 shimmer rounded-full mx-auto" /></td>
+                  <td className="px-5 py-3" />
+                </tr>
+              ))
               : products.map((product) => {
-                  const price = product.variants[0]?.price;
-                  const comparePrice = product.variants[0]?.compareAtPrice;
-                  const imageUrl = product.variants[0]?.images?.[0]?.url;
+                const price = product.variants[0]?.price;
+                const comparePrice = product.variants[0]?.compareAtPrice;
+                const imageUrl = product.variants[0]?.images?.[0]?.url;
+                const overallStock = product.variants?.reduce((sum, v) => sum + (v.inventory?.quantity ?? 0), 0) ?? 0;
+                const variantCount = product._count?.variants ?? product.variants?.length ?? 1;
 
-                  return (
-                    <tr key={product.id} className="hover:bg-[var(--color-bg-muted)] transition-colors group">
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-[var(--color-bg-muted)] flex items-center justify-center overflow-hidden">
-                            {imageUrl ? (
-                              <img src={imageUrl} alt="" className="h-full w-full object-cover" />
-                            ) : (
-                              <Package size={14} className="text-[var(--color-text-tertiary)]" />
-                            )}
-                          </div>
-                          <div>
-                            <p className="font-medium text-[var(--color-text-primary)] truncate max-w-[200px]">
-                              {product.name}
-                            </p>
-                            <p className="text-[10px] font-mono text-[var(--color-text-tertiary)]">
-                              /{product.slug}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-xs text-[var(--color-text-secondary)]">
-                        {product.store.name}
-                      </td>
-                      <td className="px-5 py-3 text-xs text-[var(--color-text-secondary)]">
-                        {product.category.name}
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <span className="font-medium text-[var(--color-text-primary)]">
-                          {"\u20B9"}{Number(price ?? 0).toLocaleString()}
-                        </span>
-                        {comparePrice && (
-                          <span className="ml-1 text-xs text-[var(--color-text-tertiary)] line-through">
-                            {"\u20B9"}{Number(comparePrice).toLocaleString()}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 text-center text-xs text-[var(--color-text-secondary)]">
-                        {product._count.variants}
-                      </td>
-                      <td className="px-5 py-3 text-center">
-                        {product.isActive ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">
-                            <CheckCircle size={10} /> Active
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-tertiary)]">
-                            <XCircle size={10} /> Inactive
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                return (
+                  <tr key={product.id} className="hover:bg-[var(--color-bg-muted)] transition-colors group">
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <Link
+                          href={`/products/${product.id}`}
+                          className="h-10 w-10 rounded-lg bg-[var(--color-bg-muted)] flex items-center justify-center overflow-hidden shrink-0 hover:opacity-85 transition-opacity"
+                        >
+                          {imageUrl ? (
+                            <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <Package size={16} className="text-[var(--color-text-tertiary)]" />
+                          )}
+                        </Link>
+                        <div>
                           <Link
-                            href={`/stores/${product.store.id}`}
-                            className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]"
-                            title="Manage in store"
+                            href={`/products/${product.id}`}
+                            className="font-medium text-[var(--color-text-primary)] hover:text-[var(--color-accent)] hover:underline truncate max-w-[200px] block transition-colors"
                           >
-                            <Edit2 size={13} />
+                            {product.name}
                           </Link>
-                          <button
-                            onClick={() => {
-                              if (confirm(`Delete "${product.name}"?`)) deleteMutation.mutate(product.id);
-                            }}
-                            className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-red-50 text-[var(--color-text-secondary)] hover:text-red-500"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          <p className="text-[10px] font-mono text-[var(--color-text-tertiary)]">
+                            /{product.slug}
+                          </p>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-xs text-[var(--color-text-secondary)]">
+                      <Link
+                        href={`/stores/${product.store.id}`}
+                        className="hover:text-[var(--color-accent)] hover:underline transition-colors"
+                      >
+                        {product.store.name}
+                      </Link>
+                    </td>
+                    <td className="px-5 py-3 text-xs text-[var(--color-text-secondary)]">
+                      {product.category.name}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <span className="font-medium text-[var(--color-text-primary)]">
+                        {"\u20B9"}{Number(price ?? 0).toLocaleString()}
+                      </span>
+                      {comparePrice && (
+                        <span className="ml-1 text-xs text-[var(--color-text-tertiary)] line-through">
+                          {"\u20B9"}{Number(comparePrice).toLocaleString()}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-center">
+                      <div className="flex flex-col items-center">
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                            overallStock <= 0
+                              ? "bg-red-50 text-red-700 border border-red-200"
+                              : overallStock <= 5
+                              ? "bg-amber-50 text-amber-700 border border-amber-200"
+                              : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          }`}
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              overallStock <= 0
+                                ? "bg-red-500"
+                                : overallStock <= 5
+                                ? "bg-amber-500"
+                                : "bg-emerald-500"
+                            }`}
+                          />
+                          {overallStock} in stock
+                        </span>
+                        <span className="text-[10px] text-[var(--color-text-tertiary)] mt-0.5 font-medium">
+                          {variantCount} {variantCount === 1 ? "variant" : "variants"}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-center">
+                      {product.isActive ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">
+                          <CheckCircle size={10} /> Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-tertiary)]">
+                          <XCircle size={10} /> Inactive
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Link
+                          href={`/products/${product.id}`}
+                          className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)] transition-colors"
+                          title="View product details"
+                        >
+                          <Eye size={13} />
+                        </Link>
+                        <Link
+                          href={`/products/${product.id}?edit=true`}
+                          className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)] transition-colors"
+                          title="Edit product"
+                        >
+                          <Edit2 size={13} />
+                        </Link>
+                        <button
+                          onClick={() => {
+                            if (confirm(`Delete "${product.name}"?`)) deleteMutation.mutate(product.id);
+                          }}
+                          className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-red-50 text-[var(--color-text-secondary)] hover:text-red-500 transition-colors"
+                          title="Delete product"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
 
@@ -226,7 +274,7 @@ export default function ProductsPage() {
             </p>
           </div>
         )}
-        
+
         {data?.meta && data.meta.totalPages && data.meta.totalPages > 0 ? (
           <div className="flex items-center justify-between border-t border-[var(--color-border)] px-5 py-3">
             <span className="text-xs text-[var(--color-text-secondary)]">

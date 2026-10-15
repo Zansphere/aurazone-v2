@@ -3,8 +3,18 @@ import { loginSchema, signupSchema, forgotPasswordSchema, resetPasswordSchema } 
 import { authenticate, setAuthCookies, clearAuthCookies } from "../../middleware/auth.js";
 import { sendSuccess, sendError } from "../../middleware/response.js";
 import * as authService from "../../services/auth.service.js";
+import { EmailService } from "../../services/email.service.js";
+import { env } from "../../config/env.js";
 
 const authRoutes: FastifyPluginAsync = async (fastify) => {
+  // Helper to extract device and IP
+  const getClientMetadata = (request: any) => {
+    const userAgent = request.headers["user-agent"] ?? "web";
+    const forwarded = request.headers["x-forwarded-for"];
+    const ip = typeof forwarded === "string" ? forwarded.split(",")[0].trim() : request.ip || "0.0.0.0";
+    return { deviceInfo: userAgent.slice(0, 200), ipAddress: ip };
+  };
+
   // ─── POST /signup ─────────────────────────────────────────────
   fastify.post("/signup", async (request, reply) => {
     const parsed = signupSchema.safeParse(request.body);
@@ -14,15 +24,26 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     try {
       const guestSession = request.headers["x-guest-session"] as string | undefined;
+      const { deviceInfo, ipAddress } = getClientMetadata(request);
 
-      const { user, accessToken, refreshToken } = await authService.signupWithEmail(
+      const { user, accessToken, refreshToken, verificationToken } = await authService.signupWithEmail(
         parsed.data.email,
         parsed.data.password,
         parsed.data.fullName,
-        guestSession
+        guestSession,
+        deviceInfo,
+        ipAddress
       );
 
       setAuthCookies(reply, accessToken, refreshToken);
+
+      // Send verification email in background
+      if (verificationToken) {
+        const verifyUrl = `${env.CUSTOMER_URL}/verify-email?token=${verificationToken}`;
+        EmailService.sendEmailVerification(user.email!, verifyUrl).catch((err) => {
+          fastify.log.error(err, "Failed to send verification email");
+        });
+      }
 
       return sendSuccess(reply, {
         user: {
@@ -30,6 +51,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
           email: user.email,
           fullName: user.fullName,
           role: user.role,
+          isEmailVerified: user.isEmailVerified,
         },
         accessToken,
         refreshToken,
@@ -49,11 +71,14 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     try {
       const guestSession = request.headers["x-guest-session"] as string | undefined;
+      const { deviceInfo, ipAddress } = getClientMetadata(request);
 
       const { user, accessToken, refreshToken } = await authService.loginWithEmail(
         parsed.data.email,
         parsed.data.password,
-        guestSession
+        guestSession,
+        deviceInfo,
+        ipAddress
       );
 
       setAuthCookies(reply, accessToken, refreshToken);
@@ -64,6 +89,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
           email: user.email,
           fullName: user.fullName,
           role: user.role,
+          isEmailVerified: user.isEmailVerified,
         },
         accessToken,
         refreshToken,
@@ -82,6 +108,36 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
     } catch (err: unknown) {
       const error = err as Error & { statusCode?: number };
       return sendError(reply, error.message, error.statusCode ?? 500);
+    }
+  });
+
+  // ─── POST /verify-email ───────────────────────────────────────
+  fastify.post("/verify-email", async (request, reply) => {
+    const { token } = request.body as { token?: string };
+    if (!token) return sendError(reply, "Verification token is required", 400);
+
+    try {
+      const user = await authService.verifyEmail(token);
+      return sendSuccess(reply, {
+        message: "Email verified successfully",
+        user: { id: user.id, email: user.email, isEmailVerified: user.isEmailVerified },
+      });
+    } catch (err: unknown) {
+      const error = err as Error & { statusCode?: number };
+      return sendError(reply, error.message, error.statusCode ?? 400);
+    }
+  });
+
+  // ─── POST /resend-verification ────────────────────────────────
+  fastify.post("/resend-verification", { preHandler: [authenticate] }, async (request, reply) => {
+    try {
+      const rawToken = await authService.createEmailVerificationToken(request.user!.userId);
+      const verifyUrl = `${env.CUSTOMER_URL}/verify-email?token=${rawToken}`;
+      await EmailService.sendEmailVerification(request.user!.email, verifyUrl);
+      return sendSuccess(reply, { message: "Verification email sent" });
+    } catch (err: unknown) {
+      const error = err as Error & { statusCode?: number };
+      return sendError(reply, error.message, error.statusCode ?? 400);
     }
   });
 
@@ -114,24 +170,42 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // ─── POST /forgot-password ────────────────────────────────────
-  fastify.post("/forgot-password", async (request, reply) => {
-    const parsed = forgotPasswordSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return sendError(reply, parsed.error.errors[0].message, 400);
+  fastify.post(
+    "/forgot-password",
+    {
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: "15 minutes",
+        },
+      },
+    },
+    async (request, reply) => {
+      const parsed = forgotPasswordSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return sendError(reply, parsed.error.errors[0].message, 400);
+      }
+
+      const token = await authService.createPasswordResetToken(parsed.data.email);
+
+      if (token) {
+        const resetUrl = `${env.CUSTOMER_URL}/reset-password?token=${token}`;
+        // Send reset email via BullMQ Queue
+        EmailService.sendPasswordResetEmail(parsed.data.email, resetUrl).catch((err) => {
+          fastify.log.error(err, "Failed to queue password reset email");
+        });
+
+        if (process.env.NODE_ENV === "development") {
+          fastify.log.info(`Password reset link for ${parsed.data.email}: ${resetUrl}`);
+        }
+      }
+
+      // Always return success to prevent email enumeration
+      return sendSuccess(reply, {
+        message: "If an account exists with this email, a password reset link has been sent.",
+      });
     }
-
-    const token = await authService.createPasswordResetToken(parsed.data.email);
-
-    // TODO: Send email with reset link via BullMQ job
-    if (token && process.env.NODE_ENV === "development") {
-      fastify.log.info(`Password reset token for ${parsed.data.email}: ${token}`);
-    }
-
-    // Always return success (don't reveal if email exists)
-    return sendSuccess(reply, {
-      message: "If an account exists with this email, a reset link has been sent.",
-    });
-  });
+  );
 
   // ─── POST /reset-password ────────────────────────────────────
   fastify.post("/reset-password", async (request, reply) => {

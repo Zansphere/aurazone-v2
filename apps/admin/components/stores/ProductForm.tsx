@@ -41,30 +41,34 @@ export default function ProductForm({
   onClose,
   onSuccess,
 }: {
-  storeId: string;
+  storeId?: string;
   productId?: string | null;
   onClose: () => void;
   onSuccess: () => void;
 }) {
   const queryClient = useQueryClient();
 
-  // Fetch attribute templates for this store
-  const { data: templatesData } = useQuery({
-    queryKey: ["admin", "attribute-templates", storeId],
-    queryFn: () => api.get<AttributeTemplate[]>(`/admin/attribute-templates?storeId=${storeId}&take=200`),
-  });
-
-  // Fetch categories for this store
-  const { data: catsData } = useQuery({
-    queryKey: ["admin", "categories", storeId],
-    queryFn: () => api.get<any[]>(`/admin/categories?storeId=${storeId}&take=200`),
-  });
-
-  // Fetch product if editing
+  // Fetch product first if editing
   const { data: productData } = useQuery({
     queryKey: ["admin", "product", productId],
     queryFn: () => api.get<any>(`/admin/products/${productId}`),
     enabled: !!productId,
+  });
+
+  const effectiveStoreId = storeId || productData?.data?.storeId || productData?.data?.store?.id;
+
+  // Fetch attribute templates for this store
+  const { data: templatesData } = useQuery({
+    queryKey: ["admin", "attribute-templates", effectiveStoreId],
+    queryFn: () => api.get<AttributeTemplate[]>(`/admin/attribute-templates?storeId=${effectiveStoreId}&take=200`),
+    enabled: !!effectiveStoreId,
+  });
+
+  // Fetch categories for this store
+  const { data: catsData } = useQuery({
+    queryKey: ["admin", "categories", effectiveStoreId],
+    queryFn: () => api.get<any[]>(`/admin/categories?storeId=${effectiveStoreId}&take=200`),
+    enabled: !!effectiveStoreId,
   });
 
   const templates: AttributeTemplate[] = (templatesData as any)?.data ?? [];
@@ -86,7 +90,7 @@ export default function ProductForm({
   });
 
   const [variants, setVariants] = useState<VariantForm[]>([
-    { sku: "", price: "", compareAtPrice: "", quantity: "0", attributes: {}, images: [] },
+    { sku: "", price: "", compareAtPrice: "", quantity: "1", attributes: {}, images: [] },
   ]);
 
   const [productAttrs, setProductAttrs] = useState<Record<string, string>>({});
@@ -94,6 +98,7 @@ export default function ProductForm({
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [deletedImageIds, setDeletedImageIds] = useState<string[]>([]);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   // Load existing product data when editing
   useEffect(() => {
@@ -118,7 +123,7 @@ export default function ProductForm({
             sku: v.sku ?? "",
             price: String(v.price ?? ""),
             compareAtPrice: v.compareAtPrice ? String(v.compareAtPrice) : "",
-            quantity: String(v.inventory?.quantity ?? 0),
+            quantity: String(Math.max(1, v.inventory?.quantity ?? 1)),
             attributes: (v.attributes ?? []).reduce(
               (acc: Record<string, string>, a: any) => ({ ...acc, [a.key]: a.value }),
               {}
@@ -165,7 +170,7 @@ export default function ProductForm({
         sku: `${slugify(form.name || "product")}-${Object.values(attrs).join("-").toLowerCase()}`,
         price: variants[0]?.price || "",
         compareAtPrice: "",
-        quantity: "0",
+        quantity: "1",
         attributes: attrs,
         images: [],
       }))
@@ -247,8 +252,28 @@ export default function ProductForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setValidationError(null);
+
+    if (!effectiveStoreId) {
+      setValidationError("Store ID is required to save the product.");
+      return;
+    }
+
+    // Validate that no variant has quantity < 1
+    for (let i = 0; i < variants.length; i++) {
+      const q = parseInt(variants[i].quantity, 10);
+      if (isNaN(q) || q < 1) {
+        setValidationError(`Stock quantity for Variant #${i + 1} must be at least 1.`);
+        return;
+      }
+      if (!variants[i].price || parseFloat(variants[i].price) <= 0) {
+        setValidationError(`Price for Variant #${i + 1} must be greater than 0.`);
+        return;
+      }
+    }
+
     const payload = {
-      storeId,
+      storeId: effectiveStoreId,
       name: form.name,
       slug: form.slug || undefined,
       brand: form.brand || undefined,
@@ -260,14 +285,16 @@ export default function ProductForm({
       isFeatured: form.isFeatured,
       hasVariants: variants.length > 1,
       variants: variants.map(v => ({
+        id: v.id,
         sku: v.sku || undefined,
         price: parseFloat(v.price),
         compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : undefined,
-        quantity: parseInt(v.quantity, 10) || 0,
+        quantity: Math.max(1, parseInt(v.quantity, 10) || 1),
         isAvailable: true,
         attributes: Object.entries(v.attributes)
           .filter(([, val]) => val)
           .map(([key, value]) => ({ key, value })),
+        images: v.images,
       })),
     };
 
@@ -281,7 +308,7 @@ export default function ProductForm({
   const addVariant = () => {
     setVariants(prev => [
       ...prev,
-      { sku: "", price: prev[0]?.price || "", compareAtPrice: "", quantity: "0", attributes: {}, images: [] },
+      { sku: "", price: prev[0]?.price || "", compareAtPrice: "", quantity: "1", attributes: {}, images: [] },
     ]);
   };
 
@@ -633,10 +660,43 @@ export default function ProductForm({
                     placeholder="Original price" />
                 </div>
                 <div>
-                  <label className="form-label">Stock Qty</label>
-                  <input type="number" className="form-input text-xs" min="0"
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="form-label !mb-0">Stock Qty</label>
+                    <span className="text-[10px] text-[var(--color-text-tertiary)]">Min 1</span>
+                  </div>
+                  <input
+                    type="number"
+                    className="form-input text-xs"
+                    min="1"
+                    step="1"
+                    required
                     value={variant.quantity}
-                    onChange={(e) => updateVariant(idx, "quantity", e.target.value)} />
+                    onKeyDown={(e) => {
+                      if (e.key === "-" || e.key === "e" || e.key === "E" || e.key === "." || e.key === "+") {
+                        e.preventDefault();
+                      }
+                    }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "") {
+                        updateVariant(idx, "quantity", "");
+                      } else {
+                        const num = parseInt(val, 10);
+                        if (isNaN(num) || num < 1) {
+                          updateVariant(idx, "quantity", "1");
+                        } else {
+                          updateVariant(idx, "quantity", String(num));
+                        }
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const num = parseInt(e.target.value, 10);
+                      if (isNaN(num) || num < 1) {
+                        updateVariant(idx, "quantity", "1");
+                      }
+                    }}
+                    placeholder="Min 1"
+                  />
                 </div>
               </div>
 
@@ -675,8 +735,14 @@ export default function ProductForm({
           </button>
         </div>
 
+        {validationError && (
+          <p className="text-xs text-[var(--color-danger)] mt-1 font-medium bg-red-50 p-2 rounded border border-red-200">
+            {validationError}
+          </p>
+        )}
+
         {(createMutation.error || updateMutation.error) && !isSlugError && !isNameError && (
-          <p className="text-xs text-[var(--color-danger)] mt-1">
+          <p className="text-xs text-[var(--color-danger)] mt-1 font-medium bg-red-50 p-2 rounded border border-red-200">
             {errorMsg}
           </p>
         )}

@@ -68,16 +68,28 @@ export async function signupWithEmail(
   email: string,
   password: string,
   fullName?: string,
-  guestSessionId?: string
-): Promise<{ user: User; accessToken: string; refreshToken: string }> {
+  guestSessionId?: string,
+  deviceInfo?: string,
+  ipAddress?: string
+): Promise<{ user: User; accessToken: string; refreshToken: string; verificationToken: string }> {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     throw Object.assign(new Error("Email already registered"), { statusCode: 409 });
   }
 
+  const rawVerificationToken = crypto.randomBytes(32).toString("hex");
+  const hashedVerificationToken = hashToken(rawVerificationToken);
+
   const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
   const user = await prisma.user.create({
-    data: { email, password: hashedPassword, fullName: fullName ?? null, role: "CUSTOMER" },
+    data: {
+      email,
+      password: hashedPassword,
+      fullName: fullName ?? null,
+      role: "CUSTOMER",
+      isEmailVerified: false,
+      emailVerificationToken: hashedVerificationToken,
+    },
   });
 
   await prisma.cart.create({ data: { userId: user.id } });
@@ -92,19 +104,21 @@ export async function signupWithEmail(
     data: {
       userId: user.id,
       refreshTokenHash: hashToken(tokens.refreshToken),
-      deviceInfo: "web",
-      ipAddress: "0.0.0.0",
+      deviceInfo: deviceInfo ?? "web",
+      ipAddress: ipAddress ?? "0.0.0.0",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     },
   });
 
-  return { user, ...tokens };
+  return { user, ...tokens, verificationToken: rawVerificationToken };
 }
 
 export async function loginWithEmail(
   email: string,
   password: string,
-  guestSessionId?: string
+  guestSessionId?: string,
+  deviceInfo?: string,
+  ipAddress?: string
 ): Promise<{ user: User; accessToken: string; refreshToken: string }> {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user || !user.password) {
@@ -125,13 +139,48 @@ export async function loginWithEmail(
     data: {
       userId: user.id,
       refreshTokenHash: hashToken(tokens.refreshToken),
-      deviceInfo: "web",
-      ipAddress: "0.0.0.0",
+      deviceInfo: deviceInfo ?? "web",
+      ipAddress: ipAddress ?? "0.0.0.0",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     },
   });
 
   return { user, ...tokens };
+}
+
+export async function verifyEmail(token: string): Promise<User> {
+  const hashedToken = hashToken(token);
+  const user = await prisma.user.findFirst({
+    where: { emailVerificationToken: hashedToken },
+  });
+
+  if (!user) {
+    throw Object.assign(new Error("Invalid or expired verification token"), { statusCode: 400 });
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      isEmailVerified: true,
+      emailVerificationToken: null,
+    },
+  });
+
+  return updatedUser;
+}
+
+export async function createEmailVerificationToken(userId: string): Promise<string> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw Object.assign(new Error("User not found"), { statusCode: 404 });
+  if (user.isEmailVerified) throw Object.assign(new Error("Email already verified"), { statusCode: 400 });
+
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  await prisma.user.update({
+    where: { id: userId },
+    data: { emailVerificationToken: hashToken(rawToken) },
+  });
+
+  return rawToken;
 }
 
 export async function getCurrentUser(userId: string) {

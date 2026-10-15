@@ -9,17 +9,28 @@ import { useRouter } from "next/navigation";
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { SearchOverlay } from "./SearchOverlay";
 
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOverlayOpen, setSearchOverlayOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const { user, isAuthenticated, logout } = useAuthStore();
   const { cart, fetchCart } = useCartStore();
   const router = useRouter();
+
+  // Global shortcut (Cmd+K / Ctrl+K) to open search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOverlayOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const { data: storesData } = useQuery({
     queryKey: ["stores", "navbar"],
@@ -97,28 +108,26 @@ export function Navbar() {
           ))}
         </nav>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1">
-          {searchOpen ? (
-            <form onSubmit={handleSearch} className="flex items-center bg-[var(--color-bg-muted)] rounded-lg px-2 mr-2">
-              <input 
-                ref={searchInputRef}
-                autoFocus
-                type="text" 
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search..." 
-                className="bg-transparent border-none outline-none text-sm w-32 md:w-48 py-1.5 px-2"
-              />
-              <button type="button" onClick={() => setSearchOpen(false)} className="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]">
-                <X size={14} />
-              </button>
-            </form>
-          ) : (
-            <button onClick={() => { setSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 100); }} className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors">
-              <Search size={18} />
-            </button>
-          )}
+          {/* Search Trigger (Live Elasticsearch Autocomplete) */}
+          <button
+            onClick={() => setSearchOverlayOpen(true)}
+            className="hidden sm:flex items-center gap-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-muted)]/60 px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-muted)] transition-all mr-1"
+          >
+            <Search size={14} className="text-[var(--color-text-tertiary)]" />
+            <span className="hidden md:inline">Search products, brands...</span>
+            <kbd className="hidden lg:inline-flex items-center gap-0.5 text-[10px] font-mono bg-[var(--color-bg-surface)] px-1.5 py-0.5 rounded border border-[var(--color-border)] text-[var(--color-text-tertiary)]">
+              ⌘K
+            </kbd>
+          </button>
+
+          {/* Mobile search icon */}
+          <button
+            onClick={() => setSearchOverlayOpen(true)}
+            className="sm:hidden flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors"
+            aria-label="Search"
+          >
+            <Search size={18} />
+          </button>
           <Link href="/wishlist" className="hidden md:flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors">
             <Heart size={18} />
           </Link>
@@ -295,9 +304,14 @@ export function Navbar() {
                 </button>
               </div>
             )}
-          </div>
         </div>
       )}
+
+      {/* Live Search Overlay */}
+      <SearchOverlay
+        isOpen={searchOverlayOpen}
+        onClose={() => setSearchOverlayOpen(false)}
+      />
     </>
   );
 }

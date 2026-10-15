@@ -368,9 +368,27 @@ export async function updateOrderStatus(id: string, status: string, adminId?: st
   return updated;
 }
 
-export async function cancelOrder(id: string, userId: string) {
+export async function cancelOrder(
+  id: string,
+  auth?: { userId?: string; sessionId?: string; trackingToken?: string } | string
+) {
   const order = await prisma.order.findUnique({ where: { id }, include: { items: true, user: true } });
-  if (!order || order.userId !== userId) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
+  if (!order) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
+
+  const userId = typeof auth === "string" ? auth : auth?.userId;
+  const sessionId = typeof auth === "object" ? auth.sessionId : undefined;
+  const trackingToken = typeof auth === "object" ? auth.trackingToken : undefined;
+
+  if (userId) {
+    if (order.userId !== userId) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
+  } else if (sessionId && order.sessionId === sessionId) {
+    // Guest matched by session
+  } else if (trackingToken && order.trackingToken === trackingToken) {
+    // Guest matched by tracking token
+  } else {
+    throw Object.assign(new Error("Unauthorized to cancel this order"), { statusCode: 401 });
+  }
+
   if (!["PENDING", "RECEIVED"].includes(order.status)) {
     throw Object.assign(new Error("Order cannot be cancelled in its current status"), { statusCode: 400 });
   }

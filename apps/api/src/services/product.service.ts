@@ -6,9 +6,11 @@ export async function listProducts(opts?: {
   storeId?: string;
   storeIds?: string[];
   categoryId?: string;
+  brand?: string | string[];
   search?: string;
   minPrice?: number;
   maxPrice?: number;
+  inStock?: boolean;
   isActive?: boolean;
   includeDeleted?: boolean;
   sortBy?: string;
@@ -24,21 +26,42 @@ export async function listProducts(opts?: {
   else if (opts?.storeIds) where.storeId = { in: opts.storeIds };
   if (opts?.categoryId) where.categoryId = opts.categoryId;
   if (opts?.isActive !== undefined) where.isActive = opts.isActive;
-  if (opts?.minPrice !== undefined || opts?.maxPrice !== undefined) {
-    where.variants = {
-      some: {
-        isAvailable: true,
-        deletedAt: null,
-        ...(opts?.minPrice !== undefined && { price: { gte: opts.minPrice } }),
-        ...(opts?.maxPrice !== undefined && { price: { lte: opts.maxPrice } }),
-      },
-    };
+
+  if (opts?.brand) {
+    const brands = Array.isArray(opts.brand)
+      ? opts.brand
+      : opts.brand.split(",").map((b) => b.trim()).filter(Boolean);
+    if (brands.length > 0) {
+      where.brand = { in: brands, mode: "insensitive" };
+    }
   }
+
+  const variantFilter: Prisma.ProductVariantListRelationFilter["some"] = {
+    isAvailable: true,
+    deletedAt: null,
+  };
+
+  if (opts?.minPrice !== undefined) {
+    variantFilter.price = { ...(variantFilter.price as object || {}), gte: opts.minPrice };
+  }
+  if (opts?.maxPrice !== undefined) {
+    variantFilter.price = { ...(variantFilter.price as object || {}), lte: opts.maxPrice };
+  }
+  if (opts?.inStock) {
+    variantFilter.inventory = { quantity: { gt: 0 } };
+  }
+
+  if (opts?.minPrice !== undefined || opts?.maxPrice !== undefined || opts?.inStock) {
+    where.variants = { some: variantFilter };
+  }
+
   if (opts?.search) {
     where.OR = [
       { name: { contains: opts.search, mode: "insensitive" } },
       { slug: { contains: opts.search, mode: "insensitive" } },
+      { brand: { contains: opts.search, mode: "insensitive" } },
       { description: { contains: opts.search, mode: "insensitive" } },
+      { tags: { has: opts.search } },
     ];
   }
 
@@ -48,6 +71,41 @@ export async function listProducts(opts?: {
     case "name_desc": orderBy = { name: "desc" }; break;
     case "newest": orderBy = { createdAt: "desc" }; break;
     case "oldest": orderBy = { createdAt: "asc" }; break;
+  }
+
+  // Handle price sorting across product variants
+  if (opts?.sortBy === "price_asc" || opts?.sortBy === "price_desc") {
+    const [allMatching, total] = await Promise.all([
+      prisma.product.findMany({
+        where,
+        include: {
+          store: { select: { id: true, name: true, slug: true } },
+          category: { select: { id: true, name: true, slug: true } },
+          variants: {
+            where: { deletedAt: null },
+            orderBy: { price: "asc" },
+            include: {
+              attributes: true,
+              images: { orderBy: { position: "asc" } },
+              inventory: true,
+            },
+          },
+          _count: { select: { variants: true } },
+        },
+      }),
+      prisma.product.count({ where }),
+    ]);
+
+    const isAsc = opts.sortBy === "price_asc";
+    const sorted = allMatching.sort((a, b) => {
+      const priceA = Number(a.variants[0]?.price ?? 0);
+      const priceB = Number(b.variants[0]?.price ?? 0);
+      return isAsc ? priceA - priceB : priceB - priceA;
+    });
+
+    const skip = opts?.skip ?? 0;
+    const take = opts?.take ?? 24;
+    return { products: sorted.slice(skip, skip + take), total };
   }
 
   const [products, total] = await Promise.all([
@@ -460,3 +518,41 @@ export async function addProductReview(slug: string, userId: string, data: { rat
 
   return review;
 }
+
+export async function getRelatedProducts(slug: string, limit = 6) {
+  const product = await prisma.product.findUnique({
+    where: { slug },
+    select: { id: true, categoryId: true, storeId: true, tags: true, brand: true },
+  });
+  if (!product) throw Object.assign(new Error("Product not found"), { statusCode: 404 });
+
+  const related = await prisma.product.findMany({
+    where: {
+      id: { not: product.id },
+      isActive: true,
+      deletedAt: null,
+      OR: [
+        { categoryId: product.categoryId },
+        ...(product.brand ? [{ brand: product.brand }] : []),
+        ...(product.tags.length > 0 ? [{ tags: { hasSome: product.tags } }] : []),
+      ],
+    },
+    take: limit,
+    orderBy: { createdAt: "desc" },
+    include: {
+      store: { select: { id: true, name: true, slug: true } },
+      category: { select: { id: true, name: true, slug: true } },
+      variants: {
+        where: { deletedAt: null },
+        orderBy: { price: "asc" },
+        include: {
+          attributes: true,
+          images: { orderBy: { position: "asc" } },
+          inventory: true,
+        },
+      },
+    },
+  });
+
+  return related;
+}

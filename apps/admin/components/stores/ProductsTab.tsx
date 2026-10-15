@@ -5,8 +5,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import {
   Plus, Search, Package, Trash2, Edit2, CheckCircle, XCircle,
-  Tag, ChevronDown, X,
+  Tag, ChevronDown, X, Eye,
 } from "lucide-react";
+import Link from "next/link";
 import ProductForm from "@/components/stores/ProductForm";
 
 interface Product {
@@ -22,6 +23,7 @@ interface Product {
     price: number;
     compareAtPrice: number | null;
     images: Array<{ url: string }>;
+    inventory?: { quantity: number; reserved?: number } | null;
   }>;
   _count: { variants: number };
   createdAt: string;
@@ -131,6 +133,8 @@ export default function ProductsTab({ storeId }: { storeId: string }) {
         {products.map((product) => {
           const mainVariant = product.variants?.[0];
           const imageUrl = mainVariant?.images?.[0]?.url;
+          const overallStock = product.variants?.reduce((sum, v) => sum + (v.inventory?.quantity ?? 0), 0) ?? 0;
+          const variantCount = product._count?.variants ?? product.variants?.length ?? 1;
 
           return (
             <div
@@ -138,17 +142,25 @@ export default function ProductsTab({ storeId }: { storeId: string }) {
               className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-[var(--color-bg-muted)] transition-colors group"
             >
               {/* Thumbnail */}
-              <div className="h-10 w-10 rounded-lg bg-[var(--color-bg-muted)] overflow-hidden flex items-center justify-center shrink-0">
+              <Link
+                href={`/products/${product.id}`}
+                className="h-10 w-10 rounded-lg bg-[var(--color-bg-muted)] overflow-hidden flex items-center justify-center shrink-0 hover:opacity-85 transition-opacity"
+              >
                 {imageUrl ? (
                   <img src={imageUrl} alt={product.name} className="h-full w-full object-cover" />
                 ) : (
                   <Package size={16} className="text-[var(--color-text-tertiary)]" />
                 )}
-              </div>
+              </Link>
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{product.name}</p>
+                  <Link
+                    href={`/products/${product.id}`}
+                    className="text-sm font-medium text-[var(--color-text-primary)] hover:text-[var(--color-accent)] hover:underline truncate transition-colors"
+                  >
+                    {product.name}
+                  </Link>
                   {product.isFeatured && (
                     <span className="text-[9px] font-medium text-[var(--color-warning-text)] bg-[var(--color-warning-bg)] px-1.5 py-0.5 rounded">★ Featured</span>
                   )}
@@ -158,8 +170,24 @@ export default function ProductsTab({ storeId }: { storeId: string }) {
                     <Tag size={9} className="inline mr-0.5" />
                     {product.category?.name}
                   </span>
+                  <span
+                    className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                      overallStock <= 0
+                        ? "bg-red-50 text-red-600 border border-red-200"
+                        : overallStock <= 5
+                        ? "bg-amber-50 text-amber-600 border border-amber-200"
+                        : "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                    }`}
+                  >
+                    <span
+                      className={`h-1 w-1 rounded-full ${
+                        overallStock <= 0 ? "bg-red-500" : overallStock <= 5 ? "bg-amber-500" : "bg-emerald-500"
+                      }`}
+                    />
+                    {overallStock} in stock
+                  </span>
                   <span className="text-[10px] text-[var(--color-text-tertiary)]">
-                    · {product._count?.variants ?? 0} variants
+                    · {variantCount} {variantCount === 1 ? "variant" : "variants"}
                   </span>
                   {product.brand && (
                     <span className="text-[10px] text-[var(--color-text-tertiary)]">· {product.brand}</span>
@@ -197,15 +225,24 @@ export default function ProductsTab({ storeId }: { storeId: string }) {
 
               {/* Actions */}
               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Link
+                  href={`/products/${product.id}`}
+                  className="flex h-6 w-6 items-center justify-center rounded hover:bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]"
+                  title="View product details"
+                >
+                  <Eye size={12} />
+                </Link>
                 <button
                   onClick={() => setEditingProduct(product.id)}
-                  className="flex h-6 w-6 items-center justify-center rounded hover:bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)]"
+                  className="flex h-6 w-6 items-center justify-center rounded hover:bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]"
+                  title="Edit product"
                 >
                   <Edit2 size={12} />
                 </button>
                 <button
                   onClick={() => { if (confirm(`Delete "${product.name}"?`)) deleteMutation.mutate(product.id); }}
                   className="flex h-6 w-6 items-center justify-center rounded hover:bg-red-50 text-[var(--color-text-secondary)] hover:text-red-500"
+                  title="Delete product"
                 >
                   <Trash2 size={12} />
                 </button>

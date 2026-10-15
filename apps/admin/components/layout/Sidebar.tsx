@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Store, Tag, Package, ShoppingCart,
   CreditCard, Truck, BarChart3, Bell, Settings,
-  Layers, ChevronLeft, ChevronRight, Users, X,
+  Layers, ChevronLeft, ChevronRight, Users, X, MessageSquare,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useUiStore } from "@/stores/ui.store";
@@ -28,6 +28,7 @@ const NAV_GROUPS = [
       { href: "/stores", label: "Stores", icon: Store },
       { href: "/products", label: "Products", icon: Tag },
       { href: "/coupons", label: "Coupons", icon: Tag },
+      { href: "/reviews", label: "Reviews", icon: MessageSquare },
     ],
   },
   {

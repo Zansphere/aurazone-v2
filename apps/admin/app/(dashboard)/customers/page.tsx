@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import {
   Users, Search, Mail, Phone, ShoppingCart,
-  CheckCircle, XCircle, Clock,
+  CheckCircle, XCircle, Clock, Download,
 } from "lucide-react";
 
 interface Customer {
@@ -31,11 +31,39 @@ export default function CustomersPage() {
 
   const customers = data?.data ?? [];
 
+  const handleExportCustomers = async () => {
+    try {
+      const token = localStorage.getItem("accessToken") || "";
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api/v1"}/admin/export/customers`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "aurazone_customers_export.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      alert("Failed to export customers CSV");
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <p className="page-label">Operations</p>
-        <h1 className="page-title">Customers</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <p className="page-label">Operations</p>
+          <h1 className="page-title">Customers</h1>
+        </div>
+        <button
+          onClick={handleExportCustomers}
+          className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] px-3.5 py-2 text-xs font-semibold hover:bg-[var(--color-bg-muted)] transition-colors shadow-sm self-start sm:self-auto"
+        >
+          <Download size={14} /> Export CSV
+        </button>
       </div>
 
       <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-surface)] px-3 py-2 w-80">

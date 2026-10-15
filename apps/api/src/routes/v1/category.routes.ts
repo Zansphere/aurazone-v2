@@ -8,6 +8,19 @@ const categoryRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/", async (request, reply) => {
     const query = request.query as Record<string, string>;
     const { skip, take } = parsePagination(query.skip, query.take);
+    const cacheKey = `cache:categories:${query.storeId || "all"}:${query.rootOnly || "all"}:${skip}:${take}`;
+
+    if (fastify.redis) {
+      try {
+        const cached = await fastify.redis.get(cacheKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          return sendPaginated(reply, parsed.categories, parsed.total, Math.floor(skip / take) + 1, take);
+        }
+      } catch {
+        // Non-blocking on cache failure
+      }
+    }
 
     const { categories, total } = await categoryService.listCategories({
       storeId: query.storeId,
@@ -17,6 +30,14 @@ const categoryRoutes: FastifyPluginAsync = async (fastify) => {
       skip,
       take,
     });
+
+    if (fastify.redis) {
+      try {
+        await fastify.redis.set(cacheKey, JSON.stringify({ categories, total }), "EX", 600); // 10 min TTL
+      } catch {
+        // Non-blocking
+      }
+    }
 
     return sendPaginated(reply, categories, total, Math.floor(skip / take) + 1, take);
   });

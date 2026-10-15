@@ -83,7 +83,7 @@ export default function TrackOrderPage() {
   const handleCancelOrder = async () => {
     if (!confirm("Are you sure you want to cancel this order?")) return;
     try {
-      await api.post(`/orders/${order.id}/cancel`);
+      await api.post(`/orders/${order.id}/cancel`, { trackingToken: token });
       alert("Order cancelled successfully");
       window.location.reload();
     } catch (err: any) {

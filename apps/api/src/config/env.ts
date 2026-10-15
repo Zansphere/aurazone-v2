@@ -15,7 +15,9 @@ export const env = {
   REDIS_URL: process.env.REDIS_URL ?? "redis://localhost:6379",
 
   // JWT
-  JWT_SECRET: process.env.JWT_SECRET ?? "dev-jwt-secret-change-in-production",
+  JWT_SECRET: process.env.JWT_SECRET ?? process.env.ACCESS_TOKEN_SECRET ?? "dev-jwt-secret-change-in-production",
+  ACCESS_TOKEN_SECRET: process.env.ACCESS_TOKEN_SECRET ?? process.env.JWT_SECRET ?? "dev-jwt-secret-change-in-production",
+  REFRESH_TOKEN_SECRET: process.env.REFRESH_TOKEN_SECRET ?? process.env.JWT_SECRET ?? "dev-jwt-secret-change-in-production",
   JWT_ACCESS_EXPIRES: process.env.JWT_ACCESS_EXPIRES ?? "15m",
   JWT_REFRESH_EXPIRES: process.env.JWT_REFRESH_EXPIRES ?? "7d",
 

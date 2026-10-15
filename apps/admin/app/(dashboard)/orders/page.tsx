@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import {
   Search, ShoppingCart, ChevronRight, Clock,
-  CheckCircle, XCircle, Truck, Package,
+  CheckCircle, XCircle, Truck, Package, Download,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -62,11 +62,39 @@ export default function OrdersPage() {
 
   const orders = data?.data ?? [];
 
+  const handleExportOrders = async () => {
+    try {
+      const token = localStorage.getItem("accessToken") || "";
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api/v1"}/admin/export/orders`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "aurazone_orders_export.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      alert("Failed to export orders CSV");
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <p className="page-label">Operations</p>
-        <h1 className="page-title">Orders</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <p className="page-label">Operations</p>
+          <h1 className="page-title">Orders</h1>
+        </div>
+        <button
+          onClick={handleExportOrders}
+          className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] px-3.5 py-2 text-xs font-semibold hover:bg-[var(--color-bg-muted)] transition-colors shadow-sm self-start sm:self-auto"
+        >
+          <Download size={14} /> Export CSV
+        </button>
       </div>
 
       {/* Filters */}

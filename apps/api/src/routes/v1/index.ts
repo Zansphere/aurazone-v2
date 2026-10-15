@@ -12,6 +12,7 @@ import storefrontRoutes from "./storefront.routes.js";
 import sessionRoutes from "./session.routes.js";
 import uploadRoutes from "./upload.routes.js";
 import adminRoutes from "./admin/index.js";
+import searchRoutes from "./search.routes.js";
 
 export const v1Routes: FastifyPluginAsync = async (fastify) => {
   // Health ping for v1
@@ -22,6 +23,7 @@ export const v1Routes: FastifyPluginAsync = async (fastify) => {
   await fastify.register(storeRoutes, { prefix: "/stores" });
   await fastify.register(categoryRoutes, { prefix: "/categories" });
   await fastify.register(productRoutes, { prefix: "/products" });
+  await fastify.register(searchRoutes, { prefix: "/search" });
   await fastify.register(storefrontRoutes, { prefix: "/storefront" });
   await fastify.register(sessionRoutes, { prefix: "/sessions" });
 

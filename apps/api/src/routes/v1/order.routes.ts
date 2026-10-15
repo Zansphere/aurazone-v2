@@ -115,11 +115,15 @@ const orderRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.post("/:id/cancel", { preHandler: [authenticate] }, async (request, reply) => {
+  fastify.post("/:id/cancel", { preHandler: [optionalAuth] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const body = (request.body as { trackingToken?: string }) || {};
+    const sessionId = request.headers["x-guest-session"] as string | undefined;
+    const userId = request.user?.userId;
+
     try {
-      await orderService.cancelOrder(id, request.user!.userId);
-      return sendSuccess(reply, { message: "Order cancelled" });
+      await orderService.cancelOrder(id, { userId, sessionId, trackingToken: body.trackingToken });
+      return sendSuccess(reply, { message: "Order cancelled successfully" });
     } catch (err: unknown) {
       const error = err as Error & { statusCode?: number };
       return sendError(reply, error.message, error.statusCode ?? 500);

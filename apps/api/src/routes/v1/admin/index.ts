@@ -9,7 +9,7 @@ import * as productService from "../../../services/product.service.js";
 import * as orderService from "../../../services/order.service.js";
 import * as attrTemplateService from "../../../services/attributeTemplate.service.js";
 import * as auditLogService from "../../../services/auditLog.service.js";
-import { prisma } from "@aurazone/database";
+import { prisma, Prisma } from "@aurazone/database";
 
 const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // All admin routes require authentication + admin role
@@ -1191,21 +1191,26 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       }),
 
       // Revenue by day (last N days)
-      prisma.$queryRawUnsafe<Array<{ day: string; revenue: number; orders: number }>>(
-        `SELECT DATE(o.created_at) as day,
-                COALESCE(SUM(o.total_amount), 0)::float as revenue,
-                COUNT(DISTINCT o.id)::int as orders
-         FROM "Order" o
-         ${allowedStoreIds && allowedStoreIds.length > 0 ? `
-           JOIN "OrderItem" oi ON o.id = oi.order_id
-           JOIN "ProductVariant" pv ON oi.variant_id = pv.id
-           JOIN "Product" p ON pv.product_id = p.id
-           WHERE o.created_at >= $1 AND p.store_id IN (${allowedStoreIds.map(id => `'${id}'`).join(',')})
-         ` : 'WHERE o.created_at >= $1'}
-         GROUP BY DATE(o.created_at)
-         ORDER BY day ASC`,
-        since
-      ),
+      allowedStoreIds && allowedStoreIds.length > 0
+        ? prisma.$queryRaw<Array<{ day: string; revenue: number; orders: number }>>`
+            SELECT DATE(o.created_at) as day,
+                   COALESCE(SUM(o.total_amount), 0)::float as revenue,
+                   COUNT(DISTINCT o.id)::int as orders
+            FROM "Order" o
+            JOIN "OrderItem" oi ON o.id = oi.order_id
+            JOIN "ProductVariant" pv ON oi.variant_id = pv.id
+            JOIN "Product" p ON pv.product_id = p.id
+            WHERE o.created_at >= ${since} AND p.store_id IN (${Prisma.join(allowedStoreIds)})
+            GROUP BY DATE(o.created_at)
+            ORDER BY day ASC`
+        : prisma.$queryRaw<Array<{ day: string; revenue: number; orders: number }>>`
+            SELECT DATE(o.created_at) as day,
+                   COALESCE(SUM(o.total_amount), 0)::float as revenue,
+                   COUNT(DISTINCT o.id)::int as orders
+            FROM "Order" o
+            WHERE o.created_at >= ${since}
+            GROUP BY DATE(o.created_at)
+            ORDER BY day ASC`,
 
       // Top products by order count
       prisma.orderItem.groupBy({
@@ -1354,6 +1359,270 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       where: { id, userId: request.user!.userId },
     });
     return sendSuccess(reply, { message: "Session revoked" });
+  });
+
+  // ╔═══════════════════════════════════════════════════════════════╗
+  // ║  REVIEWS MODERATION                                           ║
+  // ╚═══════════════════════════════════════════════════════════════╝
+
+  fastify.get("/reviews", async (request, reply) => {
+    const query = request.query as Record<string, string>;
+    const { skip, take } = parsePagination(query.skip, query.take);
+    const where: any = {};
+
+    if (query.status === "APPROVED") where.isApproved = true;
+    else if (query.status === "PENDING") where.isApproved = false;
+
+    if (query.search) {
+      where.OR = [
+        { product: { name: { contains: query.search, mode: "insensitive" } } },
+        { user: { fullName: { contains: query.search, mode: "insensitive" } } },
+        { body: { contains: query.search, mode: "insensitive" } },
+      ];
+    }
+
+    const [reviews, total] = await Promise.all([
+      prisma.productReview.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: { select: { id: true, fullName: true, email: true, avatar: true } },
+          product: { select: { id: true, name: true, slug: true } },
+        },
+      }),
+      prisma.productReview.count({ where }),
+    ]);
+
+    return sendPaginated(reply, reviews, total, Math.floor(skip / take) + 1, take);
+  });
+
+  fastify.put("/reviews/:id/approve", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const review = await prisma.productReview.update({
+      where: { id },
+      data: { isApproved: true },
+    });
+    return sendSuccess(reply, review);
+  });
+
+  fastify.put("/reviews/:id/reject", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const review = await prisma.productReview.update({
+      where: { id },
+      data: { isApproved: false },
+    });
+    return sendSuccess(reply, review);
+  });
+
+  fastify.delete("/reviews/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await prisma.productReview.delete({ where: { id } });
+    return sendSuccess(reply, { message: "Review deleted successfully" });
+  });
+
+  // ╔═══════════════════════════════════════════════════════════════╗
+  // ║  PAYMENTS & REFUNDS                                           ║
+  // ╚═══════════════════════════════════════════════════════════════╝
+
+  fastify.get("/payments", async (request, reply) => {
+    const query = request.query as Record<string, string>;
+    const { skip, take } = parsePagination(query.skip, query.take);
+    const where: any = {};
+
+    if (query.search) {
+      where.OR = [
+        { orderNumber: { contains: query.search, mode: "insensitive" } },
+        { razorpayPaymentId: { contains: query.search, mode: "insensitive" } },
+        { user: { email: { contains: query.search, mode: "insensitive" } } },
+      ];
+    }
+
+    const [orders, total] = await Promise.all([
+      prisma.order.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          orderNumber: true,
+          totalAmount: true,
+          status: true,
+          paymentStatus: true,
+          paymentMethod: true,
+          razorpayOrderId: true,
+          razorpayPaymentId: true,
+          createdAt: true,
+          user: { select: { fullName: true, email: true } },
+          orderAddress: { select: { name: true, phone: true } },
+          payments: {
+            take: 1,
+            orderBy: { createdAt: "desc" },
+            select: { id: true, gateway: true, gatewayPaymentId: true, amount: true, status: true, paidAt: true },
+          },
+        },
+      }),
+      prisma.order.count({ where }),
+    ]);
+
+    return sendPaginated(reply, orders, total, Math.floor(skip / take) + 1, take);
+  });
+
+  fastify.post("/payments/:id/refund", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { reason?: string; amount?: number } | undefined;
+
+    const order = await prisma.order.findUnique({
+      where: { id },
+      include: { payments: true },
+    });
+
+    if (!order) return sendError(reply, "Order not found", 404);
+    if (order.paymentStatus === "REFUNDED") {
+      return sendError(reply, "Order payment is already refunded", 400);
+    }
+
+    const refundAmount = body?.amount ?? Number(order.totalAmount);
+    const reason = body?.reason ?? "Customer requested refund (Admin initiated)";
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const ord = await tx.order.update({
+        where: { id },
+        data: {
+          status: "CANCELLED",
+          paymentStatus: "REFUNDED",
+        },
+      });
+
+      if (order.payments.length > 0) {
+        await tx.payment.update({
+          where: { id: order.payments[0].id },
+          data: {
+            status: "REFUNDED",
+            note: reason,
+          },
+        });
+      }
+
+      await tx.paymentLog.create({
+        data: {
+          orderId: id,
+          event: "PAYMENT_REFUNDED",
+          status: "SUCCESS",
+          gateway: order.paymentMethod,
+          message: `Admin initiated refund of ₹${refundAmount}. Reason: ${reason}`,
+          metadata: { amount: refundAmount, reason, adminUserId: request.user!.userId },
+        },
+      });
+
+      return ord;
+    });
+
+    return sendSuccess(reply, {
+      message: "Refund processed successfully",
+      order: updated,
+    });
+  });
+
+  // ╔═══════════════════════════════════════════════════════════════╗
+  // ║  CSV EXPORT REPORTING                                         ║
+  // ╚═══════════════════════════════════════════════════════════════╝
+
+  fastify.get("/export/orders", async (request, reply) => {
+    const orders = await prisma.order.findMany({
+      orderBy: { createdAt: "desc" },
+      include: {
+        user: { select: { fullName: true, email: true } },
+        orderAddress: { select: { name: true, city: true, state: true } },
+        _count: { select: { items: true } },
+      },
+      take: 1000,
+    });
+
+    const headers = ["Order Number", "Date", "Customer Name", "Customer Email", "Status", "Payment Status", "Payment Method", "Items Count", "Total Amount (INR)"];
+    const rows = orders.map((o) => [
+      `"${o.orderNumber}"`,
+      `"${o.createdAt.toISOString()}"`,
+      `"${(o.orderAddress?.name || o.user?.fullName || "Guest").replace(/"/g, '""')}"`,
+      `"${(o.user?.email || "").replace(/"/g, '""')}"`,
+      `"${o.status}"`,
+      `"${o.paymentStatus}"`,
+      `"${o.paymentMethod}"`,
+      o._count.items,
+      Number(o.totalAmount).toFixed(2),
+    ]);
+
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    reply.header("Content-Type", "text/csv");
+    reply.header("Content-Disposition", 'attachment; filename="aurazone_orders_export.csv"');
+    return reply.send(csvContent);
+  });
+
+  fastify.get("/export/customers", async (request, reply) => {
+    const customers = await prisma.user.findMany({
+      where: { role: "CUSTOMER" },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        createdAt: true,
+        _count: { select: { orders: true } },
+      },
+      take: 1000,
+    });
+
+    const headers = ["Customer ID", "Full Name", "Email", "Phone", "Orders Count", "Joined Date"];
+    const rows = customers.map((c) => [
+      `"${c.id}"`,
+      `"${(c.fullName || "").replace(/"/g, '""')}"`,
+      `"${c.email.replace(/"/g, '""')}"`,
+      `"${(c.phone || "").replace(/"/g, '""')}"`,
+      c._count.orders,
+      `"${c.createdAt.toISOString()}"`,
+    ]);
+
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    reply.header("Content-Type", "text/csv");
+    reply.header("Content-Disposition", 'attachment; filename="aurazone_customers_export.csv"');
+    return reply.send(csvContent);
+  });
+
+  fastify.get("/export/inventory", async (request, reply) => {
+    const variants = await prisma.productVariant.findMany({
+      where: { deletedAt: null },
+      orderBy: { createdAt: "desc" },
+      include: {
+        product: { select: { name: true, brand: true, store: { select: { name: true } } } },
+        inventory: true,
+      },
+      take: 1000,
+    });
+
+    const headers = ["SKU", "Product Name", "Brand", "Store", "Price (INR)", "Stock Quantity", "Reserved", "Available", "Status"];
+    const rows = variants.map((v) => {
+      const qty = v.inventory?.quantity ?? 0;
+      const res = v.inventory?.reserved ?? 0;
+      return [
+        `"${v.sku}"`,
+        `"${v.product.name.replace(/"/g, '""')}"`,
+        `"${(v.product.brand || "").replace(/"/g, '""')}"`,
+        `"${v.product.store.name.replace(/"/g, '""')}"`,
+        Number(v.price).toFixed(2),
+        qty,
+        res,
+        Math.max(0, qty - res),
+        `"${v.isAvailable ? "ACTIVE" : "INACTIVE"}"`,
+      ];
+    });
+
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    reply.header("Content-Type", "text/csv");
+    reply.header("Content-Disposition", 'attachment; filename="aurazone_inventory_export.csv"');
+    return reply.send(csvContent);
   });
 };
 

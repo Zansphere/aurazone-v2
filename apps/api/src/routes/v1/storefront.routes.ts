@@ -11,12 +11,15 @@ const storefrontRoutes: FastifyPluginAsync = async (fastify) => {
     const where: any = {
       isActive: true,
       deletedAt: null,
-      // Schedule filtering: only show sections within their active window
-      OR: [
-        { startDate: null, endDate: null },
-        { startDate: null, endDate: { gte: now } },
-        { startDate: { lte: now }, endDate: null },
-        { startDate: { lte: now }, endDate: { gte: now } },
+      AND: [
+        {
+          OR: [
+            { startDate: null, endDate: null },
+            { startDate: null, endDate: { gte: now } },
+            { startDate: { lte: now }, endDate: null },
+            { startDate: { lte: now }, endDate: { gte: now } },
+          ],
+        },
       ],
     };
 
@@ -25,14 +28,12 @@ const storefrontRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Store tenancy filtering
     if (query.storeId) {
-      where.AND = [
-        {
-          OR: [
-            { storeId: null }, // global sections
-            { storeId: query.storeId }, // store-specific sections
-          ],
-        },
-      ];
+      where.AND.push({
+        OR: [
+          { storeId: null }, // global sections
+          { storeId: query.storeId }, // store-specific sections
+        ],
+      });
     }
 
     const sections = await prisma.storefrontSection.findMany({

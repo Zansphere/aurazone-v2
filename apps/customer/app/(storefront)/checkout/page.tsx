@@ -4,12 +4,13 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { MapPin, Plus, CreditCard, Lock, ChevronRight, Tag, Truck } from "lucide-react";
+import { MapPin, Plus, CreditCard, Lock, ChevronRight, Tag, Truck, Check, X, Sparkles } from "lucide-react";
 import Link from "next/link";
 import Script from "next/script";
 
 import { useAuthStore } from "@/stores/auth.store";
 import { useCartStore } from "@/stores/cart.store";
+import { useCouponStore } from "@/stores/coupon.store";
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -23,9 +24,19 @@ export default function CheckoutPage() {
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [guestEmail, setGuestEmail] = useState("");
   const [couponCode, setCouponCode] = useState("");
-  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
-  const [couponError, setCouponError] = useState("");
+  const [localCouponError, setLocalCouponError] = useState("");
   const [isPaymentGatewayOpen, setIsPaymentGatewayOpen] = useState(false);
+
+  const {
+    appliedCoupon,
+    applyCoupon,
+    removeCoupon,
+    sorrowMessage,
+    clearSorrowMessage,
+    checkValidity,
+    calculateDiscount,
+    isLoading: isCouponLoading,
+  } = useCouponStore();
 
   const [addressForm, setAddressForm] = useState({
     name: "", phone: "", addressLine1: "", addressLine2: "",
@@ -143,19 +154,22 @@ export default function CheckoutPage() {
   const addresses = addressData?.data ?? [];
   const items = cart?.items ?? [];
   const subtotal = cart?.subtotal ?? 0;
-  
-  let discount = 0;
-  if (appliedCoupon) {
-    if (appliedCoupon.discountType === "PERCENTAGE") {
-      discount = subtotal * (appliedCoupon.discountValue / 100);
-      if (appliedCoupon.maxDiscount) discount = Math.min(discount, appliedCoupon.maxDiscount);
-    } else {
-      discount = appliedCoupon.discountValue;
+
+  const checkoutItemInputs = items.map((it: any) => ({
+    productId: it.variant?.product?.id || it.productId,
+    variantId: it.variantId,
+    price: Number(it.unitPrice),
+    quantity: it.quantity,
+  }));
+
+  useEffect(() => {
+    if (items.length > 0) {
+      checkValidity(subtotal, checkoutItemInputs);
     }
-    discount = Math.min(discount, subtotal);
-  }
+  }, [subtotal, items.length, checkValidity]);
   
-  const discountedSubtotal = subtotal - discount;
+  const discount = calculateDiscount(subtotal, checkoutItemInputs);
+  const discountedSubtotal = Math.max(0, subtotal - discount);
   const deliveryFee = deliveryOption === "express" ? 99 : (discountedSubtotal >= 499 ? 0 : 49);
   const total = discountedSubtotal + deliveryFee;
   const estimatedTax = Math.round(total - (total / 1.18)); // 18% inclusive GST
@@ -183,21 +197,19 @@ export default function CheckoutPage() {
     placeOrderMutation.mutate(data);
   };
 
-  const applyCoupon = async () => {
+  const handleApplyCoupon = async () => {
     if (!couponCode.trim()) return;
+    setLocalCouponError("");
     try {
-      setCouponError("");
-      const res = await api.post<any>("/orders/coupons/validate", { 
-        code: couponCode, 
-        subtotal: subtotal 
-      });
-      setAppliedCoupon({ 
-        code: res.data.code, 
-        discountType: res.data.discountType, 
-        discountValue: res.data.discountValue 
-      });
+      await applyCoupon(
+        couponCode,
+        subtotal,
+        checkoutItemInputs,
+        isGuest ? guestEmail : undefined
+      );
+      setCouponCode("");
     } catch (e: any) {
-      setCouponError(e.message || "Invalid coupon");
+      setLocalCouponError(e.message || "Invalid coupon");
     }
   };
 
@@ -219,13 +231,6 @@ export default function CheckoutPage() {
       </div>
     );
   }
-        <p className="text-lg font-semibold text-[var(--color-text-primary)]">Your cart is empty</p>
-        <Link href="/products" className="mt-4 inline-flex rounded-xl bg-[var(--color-primary)] px-6 py-3 text-sm font-semibold text-white">
-          Continue Shopping
-        </Link>
-      </div>
-    );
-  }
 
   const isProcessing = placeOrderMutation.isPending || createPaymentMutation.isPending || verifyPaymentMutation.isPending || isPaymentGatewayOpen;
 
@@ -233,6 +238,26 @@ export default function CheckoutPage() {
     <>
       <Script src="https://checkout.razorpay.com/v1/checkout.js" />
       <div className="section-container py-8 max-w-5xl mx-auto">
+        {/* Expiry Sorrow Message Alert */}
+        {sorrowMessage && (
+          <div className="mb-6 rounded-xl border border-rose-300 bg-rose-50/90 p-4 text-sm text-rose-900 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl select-none">💔</span>
+              <div>
+                <p className="font-bold text-rose-950 text-sm">Coupon Expired</p>
+                <p className="text-xs text-rose-800 mt-0.5 leading-relaxed">{sorrowMessage}</p>
+              </div>
+            </div>
+            <button
+              onClick={clearSorrowMessage}
+              className="text-rose-500 hover:text-rose-900 p-1 rounded-md hover:bg-rose-100 transition-colors"
+              title="Dismiss message"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
         <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-6">Checkout</h1>
 
         {placeOrderMutation.isError && (
@@ -395,18 +420,42 @@ export default function CheckoutPage() {
                   type="text" 
                   value={couponCode} 
                   onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                  placeholder="Enter code" 
-                  className="w-full rounded-lg border border-[var(--color-border)] p-2 text-sm uppercase"
+                  placeholder="Enter promo code" 
+                  className="w-full rounded-lg border border-[var(--color-border)] p-2 text-sm uppercase outline-none focus:border-[var(--color-accent)]"
                 />
                 <button 
-                  onClick={() => setAppliedCoupon({ code: couponCode, discountType: "PERCENTAGE", discountValue: 0 })}
-                  className="rounded-lg bg-[var(--color-bg-muted)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-border)] transition-colors"
+                  type="button"
+                  disabled={isCouponLoading || !couponCode.trim()}
+                  onClick={handleApplyCoupon}
+                  className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-colors disabled:opacity-50"
                 >
-                  Apply
+                  {isCouponLoading ? "..." : "Apply"}
                 </button>
               </div>
+
+              {localCouponError && (
+                <p className="mt-2 text-xs text-red-500 font-medium">{localCouponError}</p>
+              )}
+
               {appliedCoupon && (
-                <p className="mt-2 text-xs text-green-600 font-medium">Coupon attached. Discount calculated on checkout.</p>
+                <div className="mt-3 flex items-center justify-between rounded-lg bg-emerald-50 border border-emerald-200 p-2.5 text-xs text-emerald-800 animate-in fade-in">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <Check size={14} className="text-emerald-600 shrink-0" />
+                    <div>
+                      <span>Code <strong>{appliedCoupon.code}</strong> applied</span>
+                      <p className="text-[10px] text-emerald-600 font-semibold">
+                        You saved ₹{discount.toLocaleString()} on this order!
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeCoupon()}
+                    className="text-[11px] text-rose-600 hover:text-rose-800 font-bold ml-2 shrink-0 underline"
+                  >
+                    Remove
+                  </button>
+                </div>
               )}
             </div>
 
@@ -436,10 +485,12 @@ export default function CheckoutPage() {
                   <span className="text-[var(--color-text-secondary)]">Subtotal</span>
                   <span className="font-medium">{"\u20B9"}{subtotal.toLocaleString()}</span>
                 </div>
-                {appliedCoupon && (
-                  <div className="flex justify-between text-green-600">
-                    <span>Discount</span>
-                    <span className="font-medium">Calculated on checkout</span>
+                {appliedCoupon && discount > 0 && (
+                  <div className="flex justify-between text-emerald-600 font-medium">
+                    <span className="flex items-center gap-1">
+                      Discount ({appliedCoupon.code})
+                    </span>
+                    <span className="font-bold">-₹{discount.toLocaleString()}</span>
                   </div>
                 )}
                 <div className="flex justify-between">

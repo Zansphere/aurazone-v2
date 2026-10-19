@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { SearchService } from "../../services/search.service.js";
-import { sendSuccess, sendError } from "../../middleware/response.js";
+import { sendSuccess, sendError, handleRouteError } from "../../middleware/response.js";
 
 const searchRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── GET /suggestions — Live autocomplete (Elasticsearch-like) ─
@@ -16,9 +16,7 @@ const searchRoutes: FastifyPluginAsync = async (fastify) => {
       );
       return sendSuccess(reply, suggestions);
     } catch (err: unknown) {
-      const error = err as Error;
-      fastify.log.error(error);
-      return sendError(reply, error.message, 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -59,9 +57,7 @@ const searchRoutes: FastifyPluginAsync = async (fastify) => {
 
       return sendSuccess(reply, results);
     } catch (err: unknown) {
-      const error = err as Error;
-      fastify.log.error(error);
-      return sendError(reply, error.message, 500);
+      return handleRouteError(reply, err);
     }
   });
 

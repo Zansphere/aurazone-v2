@@ -224,6 +224,7 @@ export class SearchService {
     categoryId?: string;
     categorySlug?: string;
     brand?: string | string[];
+    couponCode?: string;
     minPrice?: number;
     maxPrice?: number;
     inStock?: boolean;
@@ -243,6 +244,21 @@ export class SearchService {
       isActive: true,
       deletedAt: null,
     };
+
+    if (opts.couponCode) {
+      const coupon = await prisma.coupon.findUnique({
+        where: { code: opts.couponCode.toUpperCase() },
+        include: { products: { select: { productId: true } } },
+      });
+      if (coupon) {
+        if (coupon.isProductSpecific) {
+          const productIds = coupon.products.map((p) => p.productId);
+          where.id = { in: productIds };
+        } else if (coupon.storeId) {
+          where.storeId = coupon.storeId;
+        }
+      }
+    }
 
     if (opts.storeId) where.storeId = opts.storeId;
     if (opts.storeSlug) where.store = { slug: opts.storeSlug };

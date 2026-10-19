@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { storeSchema } from "@aurazone/validators";
 import { parsePagination } from "@aurazone/utils";
-import { sendSuccess, sendError, sendPaginated } from "../../middleware/response.js";
+import { sendSuccess, sendError, sendPaginated, handleRouteError } from "../../middleware/response.js";
 import { optionalAuth } from "../../middleware/auth.js";
 import * as storeService from "../../services/store.service.js";
 
@@ -29,8 +29,7 @@ const storeRoutes: FastifyPluginAsync = async (fastify) => {
       const store = await storeService.getStoreBySlug(slug);
       return sendSuccess(reply, store);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 };

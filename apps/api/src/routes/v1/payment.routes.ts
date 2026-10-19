@@ -1,10 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
-import { prisma } from "@aurazone/database";
+import { prisma, type PaymentStatus } from "@aurazone/database";
 import crypto from "crypto";
-import { authenticate, optionalAuth } from "../../middleware/auth.js";
+import { optionalAuth } from "../../middleware/auth.js";
 import { sendSuccess, sendError } from "../../middleware/response.js";
 import { env } from "../../config/env.js";
 import * as orderService from "../../services/order.service.js";
+import { transitionOrderStatus } from "../../services/orderStateMachine.js";
+import { toPaise, toRupees } from "@aurazone/utils";
 
 const paymentRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── Create Razorpay order ──────────────────────────────────────────────────
@@ -21,18 +23,21 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
     if (!userId && order.sessionId !== sessionId) return sendError(reply, "Order not found", 404);
 
     if (order.status !== "PENDING") {
-      return sendError(reply, "Order is not in pending state", 400);
+      return sendError(reply, `Order cannot be paid in current status: ${order.status}`, 400);
     }
     if (order.paymentMethod !== "RAZORPAY") {
-      return sendError(reply, "Order payment method is not online", 400);
+      return sendError(reply, "Order payment method is not online gateway", 400);
     }
 
-    // Idempotency: if a pending payment already exists, return the existing gateway order
+    const amountInPaise = toPaise(order.totalAmount);
+
+    // Idempotency: if an active PENDING payment already exists for this order, reuse it
     const existingPayment = await prisma.payment.findFirst({
       where: { orderId: order.id, gateway: "RAZORPAY", status: "PENDING" },
+      orderBy: { createdAt: "desc" },
     });
+
     if (existingPayment && existingPayment.gatewayOrderId) {
-      const amountInPaise = Math.round(order.totalAmount.toNumber() * 100);
       return sendSuccess(reply, {
         razorpayOrderId: existingPayment.gatewayOrderId,
         amount: amountInPaise,
@@ -43,7 +48,6 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Create actual Razorpay order via API
-    const amountInPaise = Math.round(order.totalAmount.toNumber() * 100);
     let gatewayOrderId: string;
 
     try {
@@ -67,18 +71,18 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
 
       if (!rzpResponse.ok) {
         const errorBody = await rzpResponse.text();
-        console.error("Razorpay order creation failed:", errorBody);
+        console.error("[PaymentService] Razorpay order creation failed:", errorBody);
         return sendError(reply, "Failed to create payment order with gateway", 502);
       }
 
       const rzpOrder = (await rzpResponse.json()) as { id: string };
       gatewayOrderId = rzpOrder.id;
     } catch (err) {
-      console.error("Razorpay API error:", err);
+      console.error("[PaymentService] Razorpay API unreachable:", err);
       return sendError(reply, "Payment gateway unavailable", 503);
     }
 
-    // Store payment record
+    // Persist discrete payment attempt in database
     await prisma.payment.create({
       data: {
         orderId: order.id,
@@ -122,29 +126,59 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
 
     const payment = await prisma.payment.findFirst({
       where: { gatewayOrderId: razorpayOrderId },
+      include: { order: true },
     });
-    if (!payment) return sendError(reply, "Payment not found", 404);
+    if (!payment) return sendError(reply, "Payment record not found", 404);
 
-    // Prevent double processing
+    // Idempotent duplicate check: if already confirmed, return success without duplicate processing
     if (payment.status === "SUCCESS") {
       return sendSuccess(reply, { message: "Payment already verified", orderId: payment.orderId });
     }
 
-    await prisma.$transaction([
-      prisma.payment.update({
+    // Atomic confirmation transaction
+    await prisma.$transaction(async (tx) => {
+      // 1. Update Payment attempt
+      await tx.payment.update({
         where: { id: payment.id },
-        data: { gatewayPaymentId: razorpayPaymentId, status: "SUCCESS", paidAt: new Date() },
-      }),
-      prisma.order.update({
-        where: { id: payment.orderId },
-        data: { status: "RECEIVED", paymentStatus: "SUCCESS" },
-      }),
-    ]);
+        data: {
+          gatewayPaymentId: razorpayPaymentId,
+          status: "SUCCESS",
+          paidAt: new Date(),
+        },
+      });
 
-    return sendSuccess(reply, { message: "Payment verified", orderId: payment.orderId });
+      // 2. Transition Order to RECEIVED status via State Machine
+      const trackingToken = payment.order.trackingToken || crypto.randomBytes(16).toString("hex");
+      await tx.order.update({
+        where: { id: payment.orderId },
+        data: {
+          status: "RECEIVED",
+          paymentStatus: "SUCCESS",
+          razorpayPaymentId,
+          razorpayOrderId,
+          trackingToken,
+        },
+      });
+
+      // 3. Log confirmation
+      await tx.paymentLog.create({
+        data: {
+          orderId: payment.orderId,
+          paymentId: payment.id,
+          orderNumberSnapshot: payment.order.orderNumber,
+          action: "PAYMENT_CAPTURED",
+          fromStatus: payment.status,
+          toStatus: "SUCCESS",
+          amount: payment.amount,
+          note: `Payment verified via signature for Razorpay Payment ID ${razorpayPaymentId}`,
+        },
+      });
+    });
+
+    return sendSuccess(reply, { message: "Payment verified successfully", orderId: payment.orderId });
   });
 
-  // ─── Razorpay Webhook (server-to-server, no auth required) ──────────────────
+  // ─── Razorpay Webhook (Durable Deduplication & Server-to-Server Processing) ──
   fastify.post("/webhook", {
     config: { rawBody: true },
   }, async (request, reply) => {
@@ -152,11 +186,11 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
     if (!signature) return sendError(reply, "Missing signature", 400);
 
     if (!env.RAZORPAY_WEBHOOK_SECRET) {
-      console.error("RAZORPAY_WEBHOOK_SECRET is not configured");
+      console.error("[Webhook] RAZORPAY_WEBHOOK_SECRET is not configured");
       return reply.status(500).send({ status: "error", message: "Webhook secret not configured" });
     }
 
-    // Verify webhook signature using the raw body bytes
+    // 1. Verify webhook signature using the raw body bytes
     const rawBody = (request as any).rawBody ?? JSON.stringify(request.body);
     const expectedSignature = crypto
       .createHmac("sha256", env.RAZORPAY_WEBHOOK_SECRET)
@@ -169,107 +203,263 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
 
     const event = request.body as {
       event: string;
+      id?: string;
       payload: {
-        payment?: { entity: { id: string; order_id: string; status: string; amount: number } };
-        refund?: { entity: { id: string; payment_id: string; amount: number; status: string } };
+        payment?: { entity: { id: string; order_id: string; status: string; amount: number; currency: string } };
+        refund?: { entity: { id: string; payment_id: string; amount: number; status: string; currency: string } };
       };
     };
 
-    switch (event.event) {
-      case "payment.captured": {
-        const paymentEntity = event.payload.payment?.entity;
-        if (!paymentEntity) break;
+    // 2. Durable deduplication: Enforce unique event ID in database
+    const eventId =
+      (request.headers["x-razorpay-event-id"] as string) ||
+      event.id ||
+      crypto.createHash("sha256").update(typeof rawBody === "string" ? rawBody : Buffer.from(rawBody)).digest("hex");
 
-        const payment = await prisma.payment.findFirst({
-          where: { gatewayOrderId: paymentEntity.order_id },
-        });
-        if (!payment || payment.status === "SUCCESS") break;
+    const existingEvent = await prisma.webhookEvent.findUnique({
+      where: { eventId },
+    });
 
-        await prisma.$transaction([
-          prisma.payment.update({
-            where: { id: payment.id },
-            data: {
-              gatewayPaymentId: paymentEntity.id,
-              status: "SUCCESS",
-              paidAt: new Date(),
-            },
-          }),
-          prisma.order.update({
-            where: { id: payment.orderId },
-            data: { status: "RECEIVED", paymentStatus: "SUCCESS" },
-          }),
-        ]);
-        break;
-      }
+    if (existingEvent && existingEvent.status === "PROCESSED") {
+      // Idempotently acknowledge duplicate delivery
+      return reply.status(200).send({ status: "ok", message: "Event already processed" });
+    }
 
-      case "payment.failed": {
-        const paymentEntity = event.payload.payment?.entity;
-        if (!paymentEntity) break;
-
-        const payment = await prisma.payment.findFirst({
-          where: { gatewayOrderId: paymentEntity.order_id },
-        });
-        if (!payment || payment.status !== "PENDING") break;
-
-        await prisma.payment.update({
-          where: { id: payment.id },
+    // Atomically claim event record
+    if (!existingEvent) {
+      try {
+        await prisma.webhookEvent.create({
           data: {
-            gatewayPaymentId: paymentEntity.id,
-            status: "FAILED",
+            provider: "RAZORPAY",
+            eventId,
+            eventType: event.event,
+            payload: event as any,
+            status: "PROCESSING",
           },
         });
-
-        // Trigger order failure + inventory restock
-        try {
-          await orderService.failOrder(payment.orderId);
-        } catch (e) {
-          console.error("Failed to process order failure from webhook:", e);
+      } catch (err: any) {
+        if (err.code === "P2002") {
+          return reply.status(200).send({ status: "ok", message: "Concurrent webhook in progress" });
         }
-        break;
-      }
-
-      case "refund.created":
-      case "refund.processed": {
-        const refundEntity = event.payload.refund?.entity;
-        if (!refundEntity) break;
-
-        // Find the original payment by razorpay payment ID
-        const payment = await prisma.payment.findFirst({
-          where: { gatewayPaymentId: refundEntity.payment_id },
-        });
-        if (!payment) break;
-
-        // Check if we already recorded this refund (idempotency)
-        const existingRefund = await prisma.payment.findFirst({
-          where: { gateway: "RAZORPAY", gatewayPaymentId: refundEntity.id },
-        });
-        if (existingRefund) break;
-
-        // Record refund as a separate Payment row.
-        // gatewayOrderId is null — refunds are tracked by their own refund ID in gatewayPaymentId.
-        await prisma.payment.create({
-          data: {
-            orderId: payment.orderId,
-            gateway: "RAZORPAY",
-            gatewayOrderId: null,
-            gatewayPaymentId: refundEntity.id,
-            amount: refundEntity.amount / 100, // paise to INR
-            status: refundEntity.status === "processed" ? "REFUNDED" : "PENDING",
-            paidAt: refundEntity.status === "processed" ? new Date() : null,
-            note: `Refund for payment ${refundEntity.payment_id}`,
-          },
-        });
-
-        // Update order payment status
-        await prisma.order.update({
-          where: { id: payment.orderId },
-          data: { paymentStatus: "REFUNDED" },
-        });
-        break;
+        throw err;
       }
     }
 
-    // Always return 200 to Razorpay
+    // 3. Process the event with business integrity invariants
+    try {
+      switch (event.event) {
+        case "payment.captured": {
+          const paymentEntity = event.payload.payment?.entity;
+          if (!paymentEntity) break;
+
+          const payment = await prisma.payment.findFirst({
+            where: { gatewayOrderId: paymentEntity.order_id },
+            include: { order: true },
+          });
+
+          if (!payment) {
+            console.warn(`[Webhook] No payment found for gateway order: ${paymentEntity.order_id}`);
+            break;
+          }
+
+          // Financial Invariant: Verify amount matches order total in paise
+          const orderTotalPaise = toPaise(payment.order.totalAmount);
+          if (paymentEntity.amount !== orderTotalPaise) {
+            console.error(
+              `[Webhook] Amount mismatch! Expected ₹${toRupees(orderTotalPaise)} (${orderTotalPaise} paise), received ${paymentEntity.amount} paise.`
+            );
+            break;
+          }
+
+          // Financial Invariant: Handle payment success arriving after order was already CANCELLED
+          if (payment.order.status === "CANCELLED") {
+            console.warn(
+              `[Webhook] Payment ${paymentEntity.id} captured for CANCELLED order ${payment.order.orderNumber}. Preserving payment and initiating refund.`
+            );
+            await prisma.$transaction(async (tx) => {
+              await tx.payment.update({
+                where: { id: payment.id },
+                data: {
+                  gatewayPaymentId: paymentEntity.id,
+                  status: "SUCCESS",
+                  paidAt: new Date(),
+                  note: "Payment received after order cancellation. Auto-refund initiated.",
+                },
+              });
+              await tx.paymentLog.create({
+                data: {
+                  orderId: payment.orderId,
+                  paymentId: payment.id,
+                  orderNumberSnapshot: payment.order.orderNumber,
+                  action: "LATE_PAYMENT_CAPTURED",
+                  fromStatus: payment.status,
+                  toStatus: "SUCCESS",
+                  amount: payment.amount,
+                  note: "Payment succeeded after order was cancelled. Requires refund.",
+                },
+              });
+            });
+
+            // Automatically queue refund so customer is not charged for cancelled goods
+            try {
+              await orderService.initiateRefund({
+                orderId: payment.orderId,
+                amount: toRupees(paymentEntity.amount),
+                reason: "Automatic refund: Payment captured after order cancellation",
+              });
+            } catch (refundErr) {
+              console.error("[Webhook] Failed to auto-refund late captured payment:", refundErr);
+            }
+            break;
+          }
+
+          // Normal payment confirmation
+          if (payment.status !== "SUCCESS") {
+            await prisma.$transaction(async (tx) => {
+              await tx.payment.update({
+                where: { id: payment.id },
+                data: {
+                  gatewayPaymentId: paymentEntity.id,
+                  status: "SUCCESS",
+                  paidAt: new Date(),
+                },
+              });
+
+              const trackingToken = payment.order.trackingToken || crypto.randomBytes(16).toString("hex");
+              await tx.order.update({
+                where: { id: payment.orderId },
+                data: {
+                  status: "RECEIVED",
+                  paymentStatus: "SUCCESS",
+                  razorpayPaymentId: paymentEntity.id,
+                  razorpayOrderId: paymentEntity.order_id,
+                  trackingToken,
+                },
+              });
+
+              await tx.paymentLog.create({
+                data: {
+                  orderId: payment.orderId,
+                  paymentId: payment.id,
+                  orderNumberSnapshot: payment.order.orderNumber,
+                  action: "WEBHOOK_PAYMENT_CAPTURED",
+                  fromStatus: payment.status,
+                  toStatus: "SUCCESS",
+                  amount: payment.amount,
+                  note: `Confirmed via Razorpay webhook (Payment ID: ${paymentEntity.id})`,
+                },
+              });
+            });
+          }
+          break;
+        }
+
+        case "payment.failed": {
+          const paymentEntity = event.payload.payment?.entity;
+          if (!paymentEntity) break;
+
+          const payment = await prisma.payment.findFirst({
+            where: { gatewayOrderId: paymentEntity.order_id },
+          });
+
+          if (!payment || payment.status !== "PENDING") break;
+
+          await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+              gatewayPaymentId: paymentEntity.id,
+              status: "FAILED",
+            },
+          });
+
+          // Trigger safe order failure and inventory recovery
+          try {
+            await orderService.failOrder(payment.orderId);
+          } catch (e) {
+            console.error("[Webhook] Failed to process failOrder:", e);
+          }
+          break;
+        }
+
+        case "refund.created":
+        case "refund.processed": {
+          const refundEntity = event.payload.refund?.entity;
+          if (!refundEntity) break;
+
+          const payment = await prisma.payment.findFirst({
+            where: { gatewayPaymentId: refundEntity.payment_id },
+            include: { order: true },
+          });
+
+          if (!payment) break;
+
+          // Check if Refund record already exists by gatewayRefundId
+          const existingRefund = await prisma.refund.findUnique({
+            where: { gatewayRefundId: refundEntity.id },
+          });
+
+          const refundStatus = refundEntity.status === "processed" ? "SUCCEEDED" : "PENDING";
+          const refundAmount = toRupees(refundEntity.amount);
+
+          if (!existingRefund) {
+            await prisma.$transaction(async (tx) => {
+              const newRef = await tx.refund.create({
+                data: {
+                  orderId: payment.orderId,
+                  paymentId: payment.id,
+                  amount: refundAmount,
+                  currency: refundEntity.currency || "INR",
+                  status: refundStatus,
+                  gatewayRefundId: refundEntity.id,
+                  reason: `Provider webhook ${event.event}`,
+                  processedAt: refundEntity.status === "processed" ? new Date() : null,
+                },
+              });
+
+              await tx.refundLog.create({
+                data: {
+                  refundId: newRef.id,
+                  toStatus: refundStatus,
+                  actorId: "RAZORPAY_WEBHOOK",
+                  note: `Webhook received: ${event.event}`,
+                },
+              });
+
+              await tx.order.update({
+                where: { id: payment.orderId },
+                data: { paymentStatus: "REFUNDED" },
+              });
+            });
+          } else if (existingRefund.status !== "SUCCEEDED" && refundStatus === "SUCCEEDED") {
+            await prisma.refund.update({
+              where: { id: existingRefund.id },
+              data: { status: "SUCCEEDED", processedAt: new Date() },
+            });
+          }
+          break;
+        }
+      }
+
+      // Mark webhook event as durably PROCESSED
+      await prisma.webhookEvent.update({
+        where: { eventId },
+        data: {
+          status: "PROCESSED",
+          processedAt: new Date(),
+        },
+      });
+    } catch (err: any) {
+      console.error(`[Webhook] Error processing event ${eventId}:`, err);
+      await prisma.webhookEvent.update({
+        where: { eventId },
+        data: {
+          status: "FAILED",
+          lastError: err?.message || String(err),
+        },
+      });
+    }
+
+    // Always return 200 to Razorpay to prevent unnecessary retry floods
     return reply.status(200).send({ status: "ok" });
   });
 };

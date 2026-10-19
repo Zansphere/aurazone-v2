@@ -28,8 +28,12 @@ import {
   Sparkles,
   PackageCheck,
   Award,
+  Tag,
+  X,
+  Calendar,
 } from "lucide-react";
 import Link from "next/link";
+import { useCouponStore } from "@/stores/coupon.store";
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -38,6 +42,14 @@ export default function ProductDetailPage() {
   const queryClient = useQueryClient();
   const { addToCart, isLoading: cartLoading } = useCartStore();
   const { isAuthenticated } = useAuthStore();
+  const {
+    appliedCoupon,
+    applyCoupon,
+    removeCoupon,
+    sorrowMessage,
+    clearSorrowMessage,
+    checkValidity,
+  } = useCouponStore();
 
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
   const [selectedImage, setSelectedImage] = useState(0);
@@ -47,6 +59,12 @@ export default function ProductDetailPage() {
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewBody, setReviewBody] = useState("");
   const [showReviewForm, setShowReviewForm] = useState(false);
+  const [couponApplyError, setCouponApplyError] = useState("");
+  const [applyingCode, setApplyingCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    checkValidity();
+  }, [checkValidity]);
 
   // Modals & Enhancements
   const [showLightbox, setShowLightbox] = useState(false);
@@ -256,6 +274,26 @@ export default function ProductDetailPage() {
         </span>
       </nav>
 
+      {/* Expiry Sorrow Message Alert */}
+      {sorrowMessage && (
+        <div className="mb-6 rounded-xl border border-rose-300 bg-rose-50/90 p-4 text-sm text-rose-900 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl select-none">💔</span>
+            <div>
+              <p className="font-bold text-rose-950 text-sm">Coupon Expired</p>
+              <p className="text-xs text-rose-800 mt-0.5 leading-relaxed">{sorrowMessage}</p>
+            </div>
+          </div>
+          <button
+            onClick={clearSorrowMessage}
+            className="text-rose-500 hover:text-rose-900 p-1 rounded-md hover:bg-rose-100 transition-colors"
+            title="Dismiss message"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12">
         {/* Images & Lightbox Trigger */}
         <div className="space-y-3">
@@ -293,11 +331,10 @@ export default function ProductDetailPage() {
                 <button
                   key={img.id ?? idx}
                   onClick={() => setSelectedImage(idx)}
-                  className={`h-16 w-16 shrink-0 rounded-xl overflow-hidden border-2 transition-all ${
-                    selectedImage === idx
-                      ? "border-[var(--color-accent)] shadow-sm scale-95"
-                      : "border-transparent opacity-70 hover:opacity-100"
-                  }`}
+                  className={`h-16 w-16 shrink-0 rounded-xl overflow-hidden border-2 transition-all ${selectedImage === idx
+                    ? "border-[var(--color-accent)] shadow-sm scale-95"
+                    : "border-transparent opacity-70 hover:opacity-100"
+                    }`}
                 >
                   <img
                     src={img.url}
@@ -375,25 +412,173 @@ export default function ProductDetailPage() {
             </div>
           )}
 
-          {/* Price Section */}
-          <div className="flex items-baseline gap-3">
-            <span className="text-3xl font-extrabold text-[var(--color-text-primary)]">
-              {"\u20B9"}
-              {price.toLocaleString()}
-            </span>
-            {comparePrice && (
-              <>
-                <span className="text-lg text-[var(--color-text-tertiary)] line-through">
-                  {"\u20B9"}
-                  {comparePrice.toLocaleString()}
+          {/* Price Section with Coupon Live Adjustment */}
+          {(() => {
+            const isCouponApplicableToThisProduct = Boolean(
+              appliedCoupon &&
+              (!appliedCoupon.isProductSpecific ||
+                appliedCoupon.applicableProductIds?.includes(product?.id))
+            );
+
+            let adjustedPrice = price;
+            let couponDiscountOnThisProduct = 0;
+            if (isCouponApplicableToThisProduct && appliedCoupon) {
+              if (appliedCoupon.discountType === "PERCENTAGE") {
+                couponDiscountOnThisProduct = Math.round(price * (appliedCoupon.discountValue / 100));
+                if (appliedCoupon.maxDiscount) {
+                  couponDiscountOnThisProduct = Math.min(couponDiscountOnThisProduct, appliedCoupon.maxDiscount);
+                }
+              } else {
+                couponDiscountOnThisProduct = Math.min(appliedCoupon.discountValue, price);
+              }
+              adjustedPrice = Math.max(0, price - couponDiscountOnThisProduct);
+            }
+
+            return (
+              <div className="space-y-1.5">
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  {isCouponApplicableToThisProduct && couponDiscountOnThisProduct > 0 ? (
+                    <>
+                      <span className="text-3xl font-extrabold text-emerald-600">
+                        ₹{adjustedPrice.toLocaleString()}
+                      </span>
+                      <span className="text-lg text-[var(--color-text-tertiary)] line-through">
+                        ₹{price.toLocaleString()}
+                      </span>
+                      <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 border border-emerald-300">
+                        Save ₹{couponDiscountOnThisProduct.toLocaleString()} with {appliedCoupon?.code}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-3xl font-extrabold text-[var(--color-text-primary)]">
+                        ₹{price.toLocaleString()}
+                      </span>
+                      {comparePrice && (
+                        <>
+                          <span className="text-lg text-[var(--color-text-tertiary)] line-through">
+                            ₹{comparePrice.toLocaleString()}
+                          </span>
+                          <span className="rounded-full bg-[var(--color-accent-warm)]/15 px-2.5 py-0.5 text-xs font-bold text-[var(--color-accent-warm)]">
+                            {discount}% OFF
+                          </span>
+                        </>
+                      )}
+                    </>
+                  )}
+                  <span className="text-xs text-[var(--color-text-tertiary)]">(Inclusive of all taxes)</span>
+                </div>
+                {isCouponApplicableToThisProduct && couponDiscountOnThisProduct > 0 && (
+                  <p className="text-xs text-emerald-700 font-semibold flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-emerald-600" />
+                    Special promo code applied! Discount is held for you through checkout.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Applicable Product Coupons & Offers */}
+          {product.applicableCoupons && product.applicableCoupons.length > 0 && (
+            <div className="rounded-xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50/50 to-purple-50/30 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-950 flex items-center gap-1.5">
+                  <Tag size={14} className="text-indigo-600" /> Available Coupons for this Product
+                </h3>
+                <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-full border border-indigo-200">
+                  {product.applicableCoupons.length} Available
                 </span>
-                <span className="rounded-full bg-[var(--color-accent-warm)]/15 px-2.5 py-0.5 text-xs font-bold text-[var(--color-accent-warm)]">
-                  {discount}% OFF
-                </span>
-              </>
-            )}
-            <span className="text-xs text-[var(--color-text-tertiary)]">(Inclusive of all taxes)</span>
-          </div>
+              </div>
+
+              {couponApplyError && (
+                <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 p-2.5 rounded-lg font-medium">
+                  {couponApplyError}
+                </p>
+              )}
+
+              <div className="space-y-2">
+                {product.applicableCoupons.map((c: any) => {
+                  const isThisApplied = appliedCoupon?.code === c.code;
+                  return (
+                    <div
+                      key={c.id || c.code}
+                      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border bg-white transition-all ${isThisApplied
+                        ? "border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm"
+                        : "border-indigo-100 hover:border-indigo-300"
+                        }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-900 border border-indigo-200">
+                            {c.code}
+                          </span>
+                          <span className="text-xs font-bold text-emerald-700">
+                            {c.discountType === "PERCENTAGE" ? `${c.discountValue}% OFF` : `₹${c.discountValue} FLAT OFF`}
+                          </span>
+                          {c.isProductSpecific && (
+                            <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded border border-purple-200">
+                              Product Exclusive
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[var(--color-text-secondary)]">
+                          {c.description || (c.isProductSpecific ? "Special promotional savings assigned to this product." : "Store-wide discount on qualifying orders.")}
+                        </p>
+                        {c.endDate && (
+                          <p className="text-[10px] text-[var(--color-text-tertiary)] flex items-center gap-1">
+                            <Calendar size={11} /> Valid until {new Date(c.endDate).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="shrink-0 flex items-center gap-2">
+                        {isThisApplied ? (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                              <Check size={13} strokeWidth={3} /> Applied
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeCoupon()}
+                              className="text-xs font-semibold text-rose-600 hover:text-rose-800 underline transition-colors"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={applyingCode === c.code}
+                            onClick={async () => {
+                              setCouponApplyError("");
+                              setApplyingCode(c.code);
+                              try {
+                                await applyCoupon(c.code, price, [
+                                  {
+                                    productId: product.id,
+                                    variantId: variant?.id,
+                                    price,
+                                    quantity,
+                                  },
+                                ]);
+                              } catch (e: any) {
+                                setCouponApplyError(e.message || "Failed to apply coupon");
+                              } finally {
+                                setApplyingCode(null);
+                              }
+                            }}
+                            className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition-all shadow-sm active:scale-95 disabled:opacity-50"
+                          >
+                            {applyingCode === c.code ? "Applying..." : "Apply Coupon"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Variant Selector & Size Chart Modal */}
           {product.variants.length > 1 && (
@@ -421,11 +606,10 @@ export default function ProductDetailPage() {
                         setSelectedImage(0);
                         setQuantity(1);
                       }}
-                      className={`rounded-xl border px-3.5 py-2 text-xs font-medium transition-all ${
-                        selectedVariantIdx === idx
-                          ? "border-[var(--color-accent)] bg-[var(--color-accent-light)] text-[var(--color-accent)] font-bold shadow-sm"
-                          : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)]"
-                      }`}
+                      className={`rounded-xl border px-3.5 py-2 text-xs font-medium transition-all ${selectedVariantIdx === idx
+                        ? "border-[var(--color-accent)] bg-[var(--color-accent-light)] text-[var(--color-accent)] font-bold shadow-sm"
+                        : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)]"
+                        }`}
                     >
                       {label}
                     </button>
@@ -452,7 +636,7 @@ export default function ProductDetailPage() {
             {stock > 0 ? (
               <span className="text-emerald-600 font-semibold flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                In Stock & Ready to Ship ({stock} left)
+                In Stock & Ready to Ship
               </span>
             ) : (
               <span className="text-red-500 font-semibold">✕ Out of Stock</span>
@@ -483,11 +667,10 @@ export default function ProductDetailPage() {
             <button
               onClick={handleAddToCart}
               disabled={stock === 0 || cartLoading}
-              className={`flex-1 flex items-center justify-center gap-2 rounded-xl py-3 px-4 text-sm font-semibold transition-all ${
-                addedToCart
-                  ? "bg-emerald-500 text-white"
-                  : "bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] shadow-md"
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
+              className={`flex-1 flex items-center justify-center gap-2 rounded-xl py-3 px-4 text-sm font-semibold transition-all ${addedToCart
+                ? "bg-emerald-500 text-white"
+                : "bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] shadow-md"
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
             >
               {addedToCart ? (
                 <>
@@ -511,11 +694,10 @@ export default function ProductDetailPage() {
             <button
               onClick={handleWishlistToggle}
               title={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors ${
-                isWishlisted
-                  ? "border-red-300 bg-red-50 text-red-500"
-                  : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-red-500 hover:border-red-300"
-              }`}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors ${isWishlisted
+                ? "border-red-300 bg-red-50 text-red-500"
+                : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-red-500 hover:border-red-300"
+                }`}
             >
               <Heart size={18} className={isWishlisted ? "fill-current" : ""} />
             </button>
@@ -545,11 +727,10 @@ export default function ProductDetailPage() {
 
             {pincodeStatus && (
               <div
-                className={`text-xs p-2.5 rounded-xl flex items-center gap-2 ${
-                  pincodeStatus.valid
-                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
-                    : "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400"
-                }`}
+                className={`text-xs p-2.5 rounded-xl flex items-center gap-2 ${pincodeStatus.valid
+                  ? "bg-emerald-50 text-emerald-700  dark:text-emerald-400"
+                  : "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400"
+                  }`}
               >
                 {pincodeStatus.valid ? <PackageCheck size={14} /> : null}
                 <span>{pincodeStatus.message}</span>

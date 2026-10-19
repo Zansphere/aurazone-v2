@@ -2,11 +2,12 @@ import type { FastifyPluginAsync } from "fastify";
 import { storeSchema, categorySchema, productSchema, attributeTemplateSchema, storefrontSectionSchema } from "@aurazone/validators";
 import { parsePagination } from "@aurazone/utils";
 import { authenticate, requireRole, getManagerStoreIds, assertStoreAccess } from "../../../middleware/auth.js";
-import { sendSuccess, sendError, sendPaginated } from "../../../middleware/response.js";
+import { sendSuccess, sendError, sendPaginated, handleRouteError } from "../../../middleware/response.js";
 import * as storeService from "../../../services/store.service.js";
 import * as categoryService from "../../../services/category.service.js";
 import * as productService from "../../../services/product.service.js";
 import * as orderService from "../../../services/order.service.js";
+import { getAvailableNextStatuses } from "../../../services/orderStateMachine.js";
 import * as attrTemplateService from "../../../services/attributeTemplate.service.js";
 import * as auditLogService from "../../../services/auditLog.service.js";
 import { prisma, Prisma } from "@aurazone/database";
@@ -42,8 +43,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const store = await storeService.getStoreById(id);
       return sendSuccess(reply, store);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -54,8 +54,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const store = await storeService.createStore(parsed.data, request.user!.userId);
       return sendSuccess(reply, store, 201);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -71,8 +70,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const store = await storeService.updateStore(id, parsed.data, request.user!.userId);
       return sendSuccess(reply, store);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -82,8 +80,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       await storeService.deleteStore(id, request.user!.userId);
       return sendSuccess(reply, { message: "Store deleted" });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -93,8 +90,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const store = await storeService.restoreStore(id, request.user!.userId);
       return sendSuccess(reply, store);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -123,8 +119,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       await assertStoreAccess(request.user!, category.store?.id);
       return sendSuccess(reply, category);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -136,8 +131,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const category = await categoryService.createCategory(parsed.data, request.user!.userId);
       return sendSuccess(reply, category, 201);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -151,8 +145,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const category = await categoryService.updateCategory(id, parsed.data, request.user!.userId);
       return sendSuccess(reply, category);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -164,8 +157,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       await categoryService.deleteCategory(id, request.user!.userId);
       return sendSuccess(reply, { message: "Category deleted" });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -196,8 +188,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       await assertStoreAccess(request.user!, (product as any).storeId ?? (product as any).store?.id);
       return sendSuccess(reply, product);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -213,37 +204,34 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
             compareAtPrice: v.compareAtPrice ?? undefined,
           })),
         };
-        const product = await productService.createProduct(productData, request.user!.userId);
+        const product = await productService.createProduct(productData, request.user!.userId, fastify.redis);
       return sendSuccess(reply, product, 201);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
   fastify.put("/products/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
-      const existing = await productService.getProductById(id);
+      const existing = await productService.getProductById(id, fastify.redis);
       await assertStoreAccess(request.user!, (existing as any).storeId ?? (existing as any).store?.id);
-      const product = await productService.updateProduct(id, request.body as any, request.user!.userId);
+      const product = await productService.updateProduct(id, request.body as any, request.user!.userId, fastify.redis);
       return sendSuccess(reply, product);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
   fastify.delete("/products/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
-      const existing = await productService.getProductById(id);
+      const existing = await productService.getProductById(id, fastify.redis);
       await assertStoreAccess(request.user!, (existing as any).storeId ?? (existing as any).store?.id);
-      await productService.deleteProduct(id, request.user!.userId);
+      await productService.deleteProduct(id, request.user!.userId, fastify.redis);
       return sendSuccess(reply, { message: "Product deleted" });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -257,7 +245,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     const { urls } = request.body as { urls: Array<{ url: string; altText?: string; position?: number }> };
 
     try {
-      const product = await productService.getProductById(productId);
+      const product = await productService.getProductById(productId, fastify.redis);
       await assertStoreAccess(request.user!, (product as any).storeId ?? (product as any).store?.id);
 
       // Verify variant belongs to product
@@ -281,10 +269,11 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
         })),
       });
 
+      await productService.invalidateProductCache({ id: productId, slug: (product as any).slug }, fastify.redis);
+
       return sendSuccess(reply, { count: created.count }, 201);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -293,14 +282,15 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     const { productId, imageId } = request.params as { productId: string; imageId: string };
 
     try {
-      const product = await productService.getProductById(productId);
+      const product = await productService.getProductById(productId, fastify.redis);
       await assertStoreAccess(request.user!, (product as any).storeId ?? (product as any).store?.id);
 
       await prisma.productImage.delete({ where: { id: imageId } });
+      await productService.invalidateProductCache({ id: productId, slug: (product as any).slug }, fastify.redis);
+
       return sendSuccess(reply, { message: "Image deleted" });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -327,11 +317,65 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const [coupons, total] = await Promise.all([
-      prisma.coupon.findMany({ where, skip, take, orderBy: { createdAt: "desc" } }),
+      prisma.coupon.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { createdAt: "desc" },
+        include: {
+          products: {
+            include: {
+              product: {
+                select: { id: true, name: true, slug: true, brand: true }
+              }
+            }
+          },
+          _count: {
+            select: { products: true, orders: true, usages: true }
+          }
+        }
+      }),
       prisma.coupon.count({ where })
     ]);
     
     return sendPaginated(reply, coupons, total, Math.floor(skip / take) + 1, take);
+  });
+
+  fastify.get("/coupons/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const coupon = await prisma.coupon.findUnique({
+      where: { id },
+      include: {
+        products: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                brand: true,
+                storeId: true,
+                variants: {
+                  where: { deletedAt: null },
+                  select: { id: true, price: true, images: { take: 1, orderBy: { position: "asc" } } },
+                  take: 1
+                }
+              }
+            }
+          }
+        },
+        _count: { select: { products: true, orders: true, usages: true } }
+      }
+    });
+
+    if (!coupon) return sendError(reply, "Coupon not found", 404);
+
+    const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
+    if (allowedStoreIds && coupon.storeId && !allowedStoreIds.includes(coupon.storeId)) {
+      return sendError(reply, "You do not have access to this store", 403);
+    }
+
+    return sendSuccess(reply, coupon);
   });
 
   fastify.post("/coupons", async (request, reply) => {
@@ -341,23 +385,52 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       return sendError(reply, "You do not have access to this store", 403);
     }
 
-    const existing = await prisma.coupon.findUnique({ where: { code: body.code } });
+    const existing = await prisma.coupon.findUnique({ where: { code: body.code.toUpperCase() } });
     if (existing) return sendError(reply, "Coupon code already exists", 400);
 
-    const coupon = await prisma.coupon.create({
-      data: {
-        code: body.code.toUpperCase(),
-        description: body.description,
-        discountType: body.discountType,
-        discountValue: body.discountValue,
-        minOrderValue: body.minOrderValue,
-        maxDiscount: body.maxDiscount,
-        usageLimit: body.usageLimit,
-        startDate: body.startDate ? new Date(body.startDate) : null,
-        endDate: body.endDate ? new Date(body.endDate) : null,
-        isActive: body.isActive ?? true,
-        storeId: body.storeId || null,
-      }
+    const isProductSpecific = Boolean(body.isProductSpecific);
+    const productIds: string[] = Array.isArray(body.productIds) ? body.productIds : [];
+
+    const coupon = await prisma.$transaction(async (tx) => {
+      const created = await tx.coupon.create({
+        data: {
+          code: body.code.toUpperCase(),
+          description: body.description || null,
+          discountType: body.discountType,
+          discountValue: body.discountValue,
+          minOrderValue: body.minOrderValue ? body.minOrderValue : null,
+          maxDiscount: body.maxDiscount ? body.maxDiscount : null,
+          usageLimit: body.usageLimit ? Number(body.usageLimit) : null,
+          startDate: body.startDate ? new Date(body.startDate) : null,
+          endDate: body.endDate ? new Date(body.endDate) : null,
+          isActive: body.isActive ?? true,
+          isProductSpecific,
+          showInStorefront: body.showInStorefront ?? false,
+          bannerText: body.bannerText || null,
+          bannerColor: body.bannerColor || null,
+          storeId: body.storeId || null,
+          ...(isProductSpecific && productIds.length > 0
+            ? {
+                products: {
+                  create: productIds.map((pid: string) => ({
+                    productId: pid,
+                  })),
+                },
+              }
+            : {}),
+        },
+        include: {
+          products: {
+            include: {
+              product: {
+                select: { id: true, name: true, slug: true },
+              },
+            },
+          },
+        },
+      });
+
+      return created;
     });
 
     await auditLogService.logAction({
@@ -386,21 +459,55 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       return sendError(reply, "You cannot reassign to this store", 403);
     }
 
-    const coupon = await prisma.coupon.update({
-      where: { id },
-      data: {
-        code: body.code?.toUpperCase(),
-        description: body.description,
-        discountType: body.discountType,
-        discountValue: body.discountValue,
-        minOrderValue: body.minOrderValue,
-        maxDiscount: body.maxDiscount,
-        usageLimit: body.usageLimit,
-        startDate: body.startDate !== undefined ? (body.startDate ? new Date(body.startDate) : null) : undefined,
-        endDate: body.endDate !== undefined ? (body.endDate ? new Date(body.endDate) : null) : undefined,
-        isActive: body.isActive,
-        storeId: body.storeId !== undefined ? body.storeId : undefined,
+    const isProductSpecific = body.isProductSpecific !== undefined ? Boolean(body.isProductSpecific) : existing.isProductSpecific;
+    const productIds: string[] | undefined = Array.isArray(body.productIds) ? body.productIds : undefined;
+
+    const coupon = await prisma.$transaction(async (tx) => {
+      // If productIds were specified or isProductSpecific changed
+      if (productIds !== undefined || body.isProductSpecific !== undefined) {
+        await tx.couponProduct.deleteMany({ where: { couponId: id } });
+        if (isProductSpecific && productIds && productIds.length > 0) {
+          await tx.couponProduct.createMany({
+            data: productIds.map((pid) => ({
+              couponId: id,
+              productId: pid,
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
+
+      const updated = await tx.coupon.update({
+        where: { id },
+        data: {
+          code: body.code?.toUpperCase(),
+          description: body.description !== undefined ? body.description : undefined,
+          discountType: body.discountType,
+          discountValue: body.discountValue,
+          minOrderValue: body.minOrderValue !== undefined ? (body.minOrderValue ? body.minOrderValue : null) : undefined,
+          maxDiscount: body.maxDiscount !== undefined ? (body.maxDiscount ? body.maxDiscount : null) : undefined,
+          usageLimit: body.usageLimit !== undefined ? (body.usageLimit ? Number(body.usageLimit) : null) : undefined,
+          startDate: body.startDate !== undefined ? (body.startDate ? new Date(body.startDate) : null) : undefined,
+          endDate: body.endDate !== undefined ? (body.endDate ? new Date(body.endDate) : null) : undefined,
+          isActive: body.isActive !== undefined ? body.isActive : undefined,
+          isProductSpecific,
+          showInStorefront: body.showInStorefront !== undefined ? body.showInStorefront : undefined,
+          bannerText: body.bannerText !== undefined ? body.bannerText : undefined,
+          bannerColor: body.bannerColor !== undefined ? body.bannerColor : undefined,
+          storeId: body.storeId !== undefined ? body.storeId : undefined,
+        },
+        include: {
+          products: {
+            include: {
+              product: {
+                select: { id: true, name: true, slug: true },
+              },
+            },
+          },
+        },
+      });
+
+      return updated;
     });
 
     await auditLogService.logAction({
@@ -457,8 +564,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const template = await attrTemplateService.getAttributeTemplateById(id);
       return sendSuccess(reply, template);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -469,8 +575,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const template = await attrTemplateService.createAttributeTemplate(parsed.data);
       return sendSuccess(reply, template, 201);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -482,8 +587,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const template = await attrTemplateService.updateAttributeTemplate(id, parsed.data);
       return sendSuccess(reply, template);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -493,8 +597,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       await attrTemplateService.deleteAttributeTemplate(id);
       return sendSuccess(reply, { message: "Attribute template deleted" });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -581,8 +684,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       }
       return sendSuccess(reply, order);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -609,8 +711,20 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const updatedOrder = await orderService.updateOrderStatus(id, status, request.user!.userId);
       return sendSuccess(reply, updatedOrder);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
+    }
+  });
+
+  fastify.get("/orders/:id/available-transitions", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      const order = await orderService.getOrderById(id);
+      return sendSuccess(reply, {
+        currentStatus: order.status,
+        availableStatuses: getAvailableNextStatuses(order.status),
+      });
+    } catch (err: unknown) {
+      return handleRouteError(reply, err);
     }
   });
 
@@ -893,6 +1007,14 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       
       await assertStoreAccess(request.user!, inv.variant.product.storeId);
 
+      if (quantity < inv.reserved) {
+        return sendError(
+          reply,
+          `Cannot reduce physical stock to ${quantity} because ${inv.reserved} units are currently reserved in active customer carts`,
+          400
+        );
+      }
+
       const updated = await prisma.$transaction(async (tx) => {
         const result = await tx.inventory.update({
           where: { variantId },
@@ -903,6 +1025,8 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
           data: {
             variantId,
             quantity: quantity - inv.quantity,
+            balanceAfter: result.quantity,
+            reservedAfter: result.reserved,
             type: (type as any) ?? "MANUAL",
             performedBy: request.user!.userId,
             note: note ?? `Stock adjusted from ${inv.quantity} to ${quantity}`,
@@ -922,8 +1046,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
       return sendSuccess(reply, updated);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -1019,8 +1142,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
       return sendSuccess(reply, updated);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -1061,8 +1183,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
       return sendSuccess(reply, shipment, 201);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -1473,57 +1594,32 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post("/payments/:id/refund", async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { reason?: string; amount?: number } | undefined;
+    const idempotencyKey = (request.headers["idempotency-key"] || request.headers["x-idempotency-key"]) as string | undefined;
 
-    const order = await prisma.order.findUnique({
-      where: { id },
-      include: { payments: true },
-    });
+    try {
+      const refund = await orderService.initiateRefund({
+        orderId: id,
+        amount: body?.amount,
+        reason: body?.reason,
+        adminId: request.user!.userId,
+        idempotencyKey,
+      });
 
-    if (!order) return sendError(reply, "Order not found", 404);
-    if (order.paymentStatus === "REFUNDED") {
-      return sendError(reply, "Order payment is already refunded", 400);
+      await auditLogService.logAction({
+        adminId: request.user!.userId,
+        action: "REFUND",
+        entity: "PAYMENT",
+        entityId: refund.id,
+        entityName: `Refund ₹${refund.amount} for Order ${id}`,
+      });
+
+      return sendSuccess(reply, {
+        message: "Refund processed successfully",
+        refund,
+      });
+    } catch (err: unknown) {
+      return handleRouteError(reply, err);
     }
-
-    const refundAmount = body?.amount ?? Number(order.totalAmount);
-    const reason = body?.reason ?? "Customer requested refund (Admin initiated)";
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const ord = await tx.order.update({
-        where: { id },
-        data: {
-          status: "CANCELLED",
-          paymentStatus: "REFUNDED",
-        },
-      });
-
-      if (order.payments.length > 0) {
-        await tx.payment.update({
-          where: { id: order.payments[0].id },
-          data: {
-            status: "REFUNDED",
-            note: reason,
-          },
-        });
-      }
-
-      await tx.paymentLog.create({
-        data: {
-          orderId: id,
-          event: "PAYMENT_REFUNDED",
-          status: "SUCCESS",
-          gateway: order.paymentMethod,
-          message: `Admin initiated refund of ₹${refundAmount}. Reason: ${reason}`,
-          metadata: { amount: refundAmount, reason, adminUserId: request.user!.userId },
-        },
-      });
-
-      return ord;
-    });
-
-    return sendSuccess(reply, {
-      message: "Refund processed successfully",
-      order: updated,
-    });
   });
 
   // ╔═══════════════════════════════════════════════════════════════╗
@@ -1579,7 +1675,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     const rows = customers.map((c) => [
       `"${c.id}"`,
       `"${(c.fullName || "").replace(/"/g, '""')}"`,
-      `"${c.email.replace(/"/g, '""')}"`,
+      `"${(c.email || "").replace(/"/g, '""')}"`,
       `"${(c.phone || "").replace(/"/g, '""')}"`,
       c._count.orders,
       `"${c.createdAt.toISOString()}"`,

@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { parsePagination } from "@aurazone/utils";
-import { sendSuccess, sendError, sendPaginated } from "../../middleware/response.js";
+import { sendSuccess, sendError, sendPaginated, handleRouteError } from "../../middleware/response.js";
 import * as categoryService from "../../services/category.service.js";
 
 const categoryRoutes: FastifyPluginAsync = async (fastify) => {
@@ -53,8 +53,7 @@ const categoryRoutes: FastifyPluginAsync = async (fastify) => {
       const category = await categoryService.getCategoryBySlug(storeSlug, categorySlug);
       return sendSuccess(reply, category);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 };

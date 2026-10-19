@@ -16,6 +16,9 @@ import {
   Filter,
   ArrowUpDown,
   RotateCcw,
+  Tag,
+  Sparkles,
+  ArrowRight,
 } from "lucide-react";
 
 function ProductsContent() {
@@ -28,6 +31,7 @@ function ProductsContent() {
   const initialCategory = searchParams.get("categoryId") || "";
   const initialStore = searchParams.get("storeId") || "";
   const initialBrand = searchParams.get("brand") || "";
+  const initialCoupon = searchParams.get("coupon") || searchParams.get("couponCode") || "";
   const initialMinPrice = searchParams.get("minPrice") || "";
   const initialMaxPrice = searchParams.get("maxPrice") || "";
   const initialInStock = searchParams.get("inStock") === "true";
@@ -39,6 +43,7 @@ function ProductsContent() {
   const [storeId, setStoreId] = useState(initialStore);
   const [categoryId, setCategoryId] = useState(initialCategory);
   const [brand, setBrand] = useState(initialBrand);
+  const [couponCode, setCouponCode] = useState(initialCoupon);
   const [minPrice, setMinPrice] = useState(initialMinPrice);
   const [maxPrice, setMaxPrice] = useState(initialMaxPrice);
   const [inStock, setInStock] = useState(initialInStock);
@@ -53,6 +58,7 @@ function ProductsContent() {
   // Build query string for API
   const queryParts = [
     search ? `q=${encodeURIComponent(search)}` : "",
+    couponCode ? `coupon=${encodeURIComponent(couponCode)}` : "",
     `sortBy=${sortBy}`,
     `skip=${skip}`,
     `take=${pageSize}`,
@@ -83,6 +89,13 @@ function ProductsContent() {
     queryFn: () => api.get<any[]>("/categories"),
   });
 
+  const { data: storefrontCouponsData } = useQuery({
+    queryKey: ["storefront-coupons"],
+    queryFn: () => api.get<any[]>("/orders/coupons/storefront"),
+  });
+
+  const storefrontCoupons: any[] = storefrontCouponsData?.data ?? [];
+
   const searchData = searchResponse?.data;
   const products = Array.isArray(searchData?.products) ? searchData.products : [];
   const total = searchData?.total ?? 0;
@@ -100,6 +113,7 @@ function ProductsContent() {
     if (storeId) params.set("storeId", storeId);
     if (categoryId) params.set("categoryId", categoryId);
     if (brand) params.set("brand", brand);
+    if (couponCode) params.set("coupon", couponCode);
     if (minPrice) params.set("minPrice", minPrice);
     if (maxPrice) params.set("maxPrice", maxPrice);
     if (inStock) params.set("inStock", "true");
@@ -120,6 +134,7 @@ function ProductsContent() {
     setStoreId("");
     setCategoryId("");
     setBrand("");
+    setCouponCode("");
     setMinPrice("");
     setMaxPrice("");
     setInStock(false);
@@ -146,6 +161,106 @@ function ProductsContent() {
 
   return (
     <div className="section-container py-6">
+      {/* ─── Requirement 5: Storefront Promo Banner ─── */}
+      {!couponCode && storefrontCoupons.length > 0 && (
+        <div className="space-y-4 mb-6">
+          {storefrontCoupons.map((c: any) => (
+            <div
+              key={c.id || c.code}
+              className={`p-4 sm:p-5 rounded-2xl text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all ${
+                c.bannerColor === "emerald"
+                  ? "bg-gradient-to-r from-emerald-950 via-teal-900 to-emerald-950 border border-emerald-500/30"
+                  : c.bannerColor === "amber"
+                  ? "bg-gradient-to-r from-amber-950 via-yellow-900 to-amber-950 border border-amber-500/30"
+                  : c.bannerColor === "rose"
+                  ? "bg-gradient-to-r from-rose-950 via-pink-900 to-rose-950 border border-rose-500/30"
+                  : c.bannerColor === "slate"
+                  ? "bg-gradient-to-r from-slate-950 via-gray-900 to-slate-950 border border-slate-700"
+                  : "bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-950 border border-indigo-500/30"
+              }`}
+            >
+              <div className="flex items-start sm:items-center gap-3.5">
+                <div className="p-2.5 rounded-xl bg-white/10 shrink-0 backdrop-blur-sm border border-white/10">
+                  <Sparkles size={20} className="text-amber-300 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-xs font-extrabold px-2.5 py-0.5 rounded-md bg-white/20 text-amber-300 border border-white/20">
+                      {c.code}
+                    </span>
+                    <span className="text-xs font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30">
+                      {c.discountType === "PERCENTAGE" ? `${c.discountValue}% OFF` : `₹${c.discountValue} FLAT OFF`}
+                    </span>
+                    {c.isProductSpecific && (
+                      <span className="text-[10px] font-bold text-purple-200 bg-purple-500/30 px-2 py-0.5 rounded-full border border-purple-400/30">
+                        Select Products Only
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm font-bold text-slate-100 mt-1">
+                    {c.bannerText || c.description || `Special discount with coupon ${c.code}!`}
+                  </p>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    {c.isProductSpecific
+                      ? `Exclusively assigned to ${c.products?.length || 0} product(s). Click to view.`
+                      : "Applicable on all qualifying store products."}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCouponCode(c.code);
+                  setPage(1);
+                  const params = new URLSearchParams(searchParams.toString());
+                  params.set("coupon", c.code);
+                  router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-white text-slate-900 hover:bg-slate-100 transition-all shadow-sm active:scale-95 shrink-0"
+              >
+                View Eligible Products <ArrowRight size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Active Promo Coupon Filter Banner */}
+      {couponCode && (
+        <div className="mb-6 p-4 rounded-2xl bg-indigo-50 border border-indigo-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-indigo-600 text-white shadow-sm shrink-0">
+              <Tag size={18} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm text-indigo-950 font-mono">PROMO: {couponCode}</span>
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                  Active Filter
+                </span>
+              </div>
+              <p className="text-xs text-indigo-800 mt-0.5">
+                Displaying only products assigned and eligible for coupon code &quot;{couponCode}&quot;.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setCouponCode("");
+              setPage(1);
+              const params = new URLSearchParams(searchParams.toString());
+              params.delete("coupon");
+              params.delete("couponCode");
+              router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+            }}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-950 bg-white px-3.5 py-1.5 rounded-xl border border-indigo-200 shrink-0 shadow-sm transition-all"
+          >
+            <X size={14} /> Clear Promo Filter
+          </button>
+        </div>
+      )}
+
       {/* Header & Results Count */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>

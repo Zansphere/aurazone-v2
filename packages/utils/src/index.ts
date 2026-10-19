@@ -1,6 +1,73 @@
-// ─── Currency ────────────────────────────────────────────────────────────────
+// ─── Currency & Financial Exactness ─────────────────────────────────────────
 export const formatCurrency = (amount: number, currency = "INR"): string =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency }).format(amount);
+
+/**
+ * Converts any currency representation (number, string, or Decimal) to integer paise (minor units)
+ * to avoid floating-point rounding errors during financial calculations.
+ */
+export const toPaise = (amount: number | string | { toNumber?: () => number } | null | undefined): number => {
+  if (amount === null || amount === undefined) return 0;
+  if (typeof amount === "object" && typeof amount.toNumber === "function") {
+    return Math.round(amount.toNumber() * 100);
+  }
+  const num = typeof amount === "string" ? parseFloat(amount) : Number(amount);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round(num * 100);
+};
+
+/**
+ * Converts integer paise back to rupees as exact 2-decimal number.
+ */
+export const toRupees = (paise: number): number => {
+  return Math.round(paise) / 100;
+};
+
+/**
+ * Calculates item subtotal in paise without float drift.
+ */
+export const calcItemSubtotalPaise = (unitPrice: number | string | { toNumber?: () => number }, quantity: number): number => {
+  const pricePaise = toPaise(unitPrice);
+  const qty = Math.max(0, Math.floor(quantity));
+  return pricePaise * qty;
+};
+
+/**
+ * Calculates coupon discount in integer paise.
+ */
+export const calcDiscountPaise = (
+  subtotalPaise: number,
+  discountType: "PERCENTAGE" | "FIXED_AMOUNT",
+  discountValue: number | string | { toNumber?: () => number },
+  maxDiscount?: number | string | { toNumber?: () => number } | null
+): number => {
+  let discountPaise = 0;
+  const val = typeof discountValue === "object" && typeof discountValue?.toNumber === "function"
+    ? discountValue.toNumber()
+    : Number(discountValue);
+
+  if (discountType === "PERCENTAGE") {
+    discountPaise = Math.round((subtotalPaise * val) / 100);
+    if (maxDiscount !== undefined && maxDiscount !== null) {
+      const maxPaise = toPaise(maxDiscount);
+      discountPaise = Math.min(discountPaise, maxPaise);
+    }
+  } else {
+    discountPaise = toPaise(discountValue);
+  }
+  return Math.max(0, Math.min(discountPaise, subtotalPaise));
+};
+
+/**
+ * Calculates delivery fee in integer paise based on subtotal.
+ */
+export const calcDeliveryFeePaise = (
+  subtotalPaise: number,
+  freeShippingThresholdRupees = 499,
+  standardFeeRupees = 49
+): number => {
+  return subtotalPaise >= freeShippingThresholdRupees * 100 ? 0 : standardFeeRupees * 100;
+};
 
 // ─── Date ─────────────────────────────────────────────────────────────────────
 export const formatDate = (date: string | Date): string =>

@@ -1,8 +1,9 @@
 import type { FastifyPluginAsync } from "fastify";
 import { addToCartSchema, updateCartItemSchema } from "@aurazone/validators";
+import { toRupees, calcItemSubtotalPaise } from "@aurazone/utils";
 import { prisma } from "@aurazone/database";
 import { optionalAuth } from "../../middleware/auth.js";
-import { sendSuccess, sendError } from "../../middleware/response.js";
+import { sendSuccess, sendError, handleRouteError } from "../../middleware/response.js";
 import { holdInventory, releaseInventory } from "../../services/inventory.service.js";
 
 const cartRoutes: FastifyPluginAsync = async (fastify) => {
@@ -72,18 +73,19 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
         return sendSuccess(reply, { items: [], itemCount: 0, subtotal: 0 });
       }
 
-      const subtotal = cart.items.reduce(
-        (sum, item) => sum + item.unitPrice.toNumber() * item.quantity,
+      const subtotalPaise = cart.items.reduce(
+        (sum, item) => sum + calcItemSubtotalPaise(item.unitPrice, item.quantity),
         0
       );
+      const subtotal = toRupees(subtotalPaise);
 
       return sendSuccess(reply, {
         ...cart!,
         itemCount: cart.items.reduce((sum, item) => sum + item.quantity, 0),
         subtotal,
       });
-    } catch (e: any) {
-      return sendError(reply, e.message, 500);
+    } catch (e: unknown) {
+      return handleRouteError(reply, e);
     }
   });
 
@@ -121,10 +123,10 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
       if (qtyToAdd > stock) return sendError(reply, `Only ${stock} available in stock`, 400);
 
       if (existing) {
-        // Update quantity first, then hold with the cartItemId we already have
+        // Atomic increment prevents lost updates under concurrent requests
         await prisma.cartItem.update({ 
           where: { id: existing.id }, 
-          data: { quantity: existing.quantity + qtyToAdd } 
+          data: { quantity: { increment: qtyToAdd } } 
         });
         await holdInventory(parsed.data.variantId, qtyToAdd, existing.id, `Cart hold for ${cart.id}`);
       } else {
@@ -142,8 +144,8 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       return sendSuccess(reply, { message: "Item added to cart" }, 201);
-    } catch (e: any) {
-      return sendError(reply, e.message, 500);
+    } catch (e: unknown) {
+      return handleRouteError(reply, e);
     }
   });
 
@@ -184,8 +186,8 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
         data: { quantity: parsed.data.quantity },
       });
       return sendSuccess(reply, updated);
-    } catch (e: any) {
-      return sendError(reply, e.message, 500);
+    } catch (e: unknown) {
+      return handleRouteError(reply, e);
     }
   });
 
@@ -210,8 +212,8 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
       await releaseInventory(item.variantId, item.quantity, item.id, `Cart release for ${item.cartId}`);
       await prisma.cartItem.delete({ where: { id: itemId } });
       return sendSuccess(reply, { message: "Item removed from cart" });
-    } catch (e: any) {
-      return sendError(reply, e.message, 500);
+    } catch (e: unknown) {
+      return handleRouteError(reply, e);
     }
   });
 
@@ -229,8 +231,8 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
         await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
       }
       return sendSuccess(reply, { message: "Cart cleared" });
-    } catch (e: any) {
-      return sendError(reply, e.message, 500);
+    } catch (e: unknown) {
+      return handleRouteError(reply, e);
     }
   });
 };

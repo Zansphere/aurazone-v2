@@ -75,3 +75,11 @@ if (env.NODE_ENV === "production") {
     }
   }
 }
+
+// Security check: Warn if using superuser/owner role for application connection
+if (env.DATABASE_URL.includes("neondb_owner") || env.DATABASE_URL.includes("postgres:postgres")) {
+  console.warn(
+    "[SECURITY WARNING] Database connection URL appears to use an administrative/owner role (e.g., 'neondb_owner'). " +
+    "For production defense-in-depth, configure a dedicated application role with least-privilege (DML only, no DDL/DROP) permissions."
+  );
+}

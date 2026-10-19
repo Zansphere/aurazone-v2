@@ -75,15 +75,6 @@ export function Navbar() {
     router.push("/");
   };
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      router.push(`/products?search=${encodeURIComponent(searchQuery.trim())}`);
-      setSearchOpen(false);
-      setSearchQuery("");
-    }
-  };
-
   const initials = user?.fullName
     ? user.fullName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
     : user?.email?.[0]?.toUpperCase() ?? "U";
@@ -92,7 +83,7 @@ export function Navbar() {
     <>
       <header
         style={{ height: "var(--header-height)" }}
-        className="fixed inset-x-0 top-0 z-50 flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-bg-surface)]/95 backdrop-blur-md px-4 md:px-8"
+        className="relative w-full z-40 flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-bg-surface)]/95 backdrop-blur-md px-4 md:px-8"
       >
         {/* Logo */}
         <Link href="/" className="text-lg font-bold font-[var(--font-heading)] text-[var(--color-text-primary)] shrink-0">
@@ -108,6 +99,8 @@ export function Navbar() {
           ))}
         </nav>
 
+        {/* Right-side actions */}
+        <div className="flex items-center gap-2">
           {/* Search Trigger (Live Elasticsearch Autocomplete) */}
           <button
             onClick={() => setSearchOverlayOpen(true)}
@@ -304,6 +297,7 @@ export function Navbar() {
                 </button>
               </div>
             )}
+          </div>
         </div>
       )}
 

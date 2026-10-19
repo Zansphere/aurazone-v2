@@ -87,7 +87,7 @@ export async function signupWithEmail(
       password: hashedPassword,
       fullName: fullName ?? null,
       role: "CUSTOMER",
-      isEmailVerified: false,
+      isEmailVerified: null,
       emailVerificationToken: hashedVerificationToken,
     },
   });
@@ -161,7 +161,7 @@ export async function verifyEmail(token: string): Promise<User> {
   const updatedUser = await prisma.user.update({
     where: { id: user.id },
     data: {
-      isEmailVerified: true,
+      isEmailVerified: new Date(),
       emailVerificationToken: null,
     },
   });

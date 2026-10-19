@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { parsePagination } from "@aurazone/utils";
-import { sendSuccess, sendError, sendPaginated } from "../../middleware/response.js";
+import { sendSuccess, sendError, sendPaginated, handleRouteError } from "../../middleware/response.js";
 import { authenticate } from "../../middleware/auth.js";
 import * as productService from "../../services/product.service.js";
 import { SearchService } from "../../services/search.service.js";
@@ -17,6 +17,7 @@ const productRoutes: FastifyPluginAsync = async (fastify) => {
         categoryId: query.categoryId,
         categorySlug: query.categorySlug,
         brand: query.brand,
+        couponCode: query.coupon ?? query.couponCode,
         minPrice: query.minPrice ? Number(query.minPrice) : undefined,
         maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
         inStock: query.inStock === "true" || query.inStock === "1",
@@ -27,8 +28,7 @@ const productRoutes: FastifyPluginAsync = async (fastify) => {
       });
       return sendSuccess(reply, results);
     } catch (err: unknown) {
-      const error = err as Error;
-      return sendError(reply, error.message, 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -41,6 +41,7 @@ const productRoutes: FastifyPluginAsync = async (fastify) => {
       storeId: query.storeId,
       categoryId: query.categoryId,
       brand: query.brand,
+      couponCode: query.coupon ?? query.couponCode,
       search: query.search ?? query.q,
       minPrice: query.minPrice ? Number(query.minPrice) : undefined,
       maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
@@ -49,6 +50,7 @@ const productRoutes: FastifyPluginAsync = async (fastify) => {
       sortBy: query.sortBy,
       skip,
       take,
+      redis: fastify.redis,
     });
 
     return sendPaginated(reply, products, total, Math.floor(skip / take) + 1, take);
@@ -59,11 +61,10 @@ const productRoutes: FastifyPluginAsync = async (fastify) => {
     const { slug } = request.params as { slug: string };
 
     try {
-      const product = await productService.getProductBySlug(slug);
+      const product = await productService.getProductBySlug(slug, fastify.redis);
       return sendSuccess(reply, product);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -74,8 +75,7 @@ const productRoutes: FastifyPluginAsync = async (fastify) => {
       const reviews = await productService.getProductReviews(slug);
       return sendSuccess(reply, reviews);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -88,8 +88,7 @@ const productRoutes: FastifyPluginAsync = async (fastify) => {
       const review = await productService.addProductReview(slug, request.user!.userId, body);
       return sendSuccess(reply, review, 201);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -102,8 +101,7 @@ const productRoutes: FastifyPluginAsync = async (fastify) => {
       const related = await productService.getRelatedProducts(slug, limit);
       return sendSuccess(reply, related);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 };

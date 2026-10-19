@@ -127,9 +127,8 @@ export function ProductCard({ product, viewMode = "grid" }: ProductCardProps) {
                 </span>
                 <button
                   onClick={handleWishlistToggle}
-                  className={`flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
-                    isWishlisted ? "border-red-300 bg-red-50 text-red-500" : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-red-500"
-                  }`}
+                  className={`flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${isWishlisted ? "border-red-300 bg-red-50 text-red-500" : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-red-500"
+                    }`}
                   title={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
                 >
                   <Heart size={14} className={isWishlisted ? "fill-current" : ""} />
@@ -153,7 +152,7 @@ export function ProductCard({ product, viewMode = "grid" }: ProductCardProps) {
                 )}
                 {stock <= 5 && stock > 0 && (
                   <span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
-                    Only {stock} left
+                    Only a few left
                   </span>
                 )}
               </div>
@@ -220,11 +219,10 @@ export function ProductCard({ product, viewMode = "grid" }: ProductCardProps) {
             <button
               onClick={handleWishlistToggle}
               title={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
-              className={`flex h-8 w-8 items-center justify-center rounded-full shadow-sm backdrop-blur-md transition-all ${
-                isWishlisted
-                  ? "bg-red-50 text-red-500"
-                  : "bg-white/80 dark:bg-black/60 text-[var(--color-text-secondary)] hover:text-red-500 hover:bg-white dark:hover:bg-black"
-              }`}
+              className={`flex h-8 w-8 items-center justify-center rounded-full shadow-sm backdrop-blur-md transition-all ${isWishlisted
+                ? "bg-red-50 text-red-500"
+                : "bg-white/80 text-[var(--color-text-secondary)] hover:text-red-500 hover:bg-white "
+                }`}
             >
               <Heart size={14} className={isWishlisted ? "fill-current" : ""} />
             </button>
@@ -233,7 +231,7 @@ export function ProductCard({ product, viewMode = "grid" }: ProductCardProps) {
             <button
               onClick={handleOpenQuickView}
               title="Quick view"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/80 dark:bg-black/60 text-[var(--color-text-secondary)] shadow-sm backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all hover:text-[var(--color-text-primary)] hover:bg-white dark:hover:bg-black"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/80  text-[var(--color-text-secondary)] shadow-sm backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all hover:text-[var(--color-text-primary)] hover:bg-white "
             >
               <Eye size={14} />
             </button>
@@ -244,7 +242,7 @@ export function ProductCard({ product, viewMode = "grid" }: ProductCardProps) {
             <button
               onClick={handleQuickAdd}
               disabled={stock === 0 || cartLoading}
-              className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-white/95 dark:bg-black/90 py-2.5 text-xs font-semibold text-[var(--color-text-primary)] shadow-lg backdrop-blur-sm hover:bg-[var(--color-primary)] hover:text-white transition-all disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-white/95 py-2.5 text-xs font-semibold text-[var(--color-text-primary)] shadow-lg backdrop-blur-sm hover:bg-[var(--color-primary)] hover:text-white transition-all disabled:opacity-50"
             >
               {added ? <Check size={14} className="text-emerald-500" /> : <ShoppingCart size={14} />}
               {added ? "Added to Cart" : "Quick Add"}

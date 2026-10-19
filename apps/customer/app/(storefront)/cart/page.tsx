@@ -1,20 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Minus, Plus, Trash2, ShoppingCart, ArrowRight, Bookmark, Tag, Check, Sparkles } from "lucide-react";
+import { Minus, Plus, Trash2, ShoppingCart, ArrowRight, Bookmark, Tag, Check, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { useAuthStore } from "@/stores/auth.store";
+import { useCouponStore } from "@/stores/coupon.store";
 
 export default function CartPage() {
   const queryClient = useQueryClient();
   const { isAuthenticated } = useAuthStore();
+  const {
+    appliedCoupon,
+    applyCoupon,
+    removeCoupon,
+    sorrowMessage,
+    clearSorrowMessage,
+    checkValidity,
+    calculateDiscount,
+    isLoading: couponLoading,
+  } = useCouponStore();
 
   const [couponCode, setCouponCode] = useState("");
-  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
-  const [couponError, setCouponError] = useState("");
-  const [couponLoading, setCouponLoading] = useState(false);
+  const [localCouponError, setLocalCouponError] = useState("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["cart"],
@@ -71,25 +80,31 @@ export default function CartPage() {
   const itemCount = cart?.itemCount ?? 0;
   const savedItems: any[] = wishlistData?.data ?? [];
 
+  const cartItemInputs = items.map((it: any) => ({
+    productId: it.variant?.product?.id || it.productId,
+    variantId: it.variantId,
+    price: Number(it.unitPrice),
+    quantity: it.quantity,
+  }));
+
+  useEffect(() => {
+    if (items.length > 0) {
+      checkValidity(subtotal, cartItemInputs);
+    }
+  }, [subtotal, items.length, checkValidity]);
+
   const handleApplyCoupon = async () => {
     if (!couponCode.trim()) return;
-    setCouponLoading(true);
-    setCouponError("");
+    setLocalCouponError("");
     try {
-      const res = await api.post<any>("/orders/coupons/validate", {
-        code: couponCode.trim(),
-        subtotal,
-      });
-      setAppliedCoupon(res.data);
+      await applyCoupon(couponCode, subtotal, cartItemInputs);
+      setCouponCode("");
     } catch (err: any) {
-      setCouponError(err.message || "Invalid or expired coupon");
-      setAppliedCoupon(null);
-    } finally {
-      setCouponLoading(false);
+      setLocalCouponError(err.message || "Invalid or expired coupon");
     }
   };
 
-  const discountAmount = appliedCoupon?.discount ?? 0;
+  const discountAmount = calculateDiscount(subtotal, cartItemInputs);
   const discountedSubtotal = Math.max(0, subtotal - discountAmount);
   const deliveryFee = discountedSubtotal >= 499 ? 0 : 49;
   const total = discountedSubtotal + deliveryFee;
@@ -128,6 +143,26 @@ export default function CartPage() {
 
   return (
     <div className="section-container py-8">
+      {/* Expiry Sorrow Message Alert */}
+      {sorrowMessage && (
+        <div className="mb-6 rounded-xl border border-rose-300 bg-rose-50/90 p-4 text-sm text-rose-900 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl select-none">💔</span>
+            <div>
+              <p className="font-bold text-rose-950 text-sm">Coupon Expired</p>
+              <p className="text-xs text-rose-800 mt-0.5 leading-relaxed">{sorrowMessage}</p>
+            </div>
+          </div>
+          <button
+            onClick={clearSorrowMessage}
+            className="text-rose-500 hover:text-rose-900 p-1 rounded-md hover:bg-rose-100 transition-colors"
+            title="Dismiss message"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-6">
         Shopping Cart <span className="text-base font-normal text-[var(--color-text-tertiary)]">({itemCount} items)</span>
       </h1>
@@ -277,17 +312,24 @@ export default function CartPage() {
                 {couponLoading ? "..." : "Apply"}
               </button>
             </div>
-            {couponError && <p className="mt-2 text-xs text-red-500">{couponError}</p>}
+            {localCouponError && <p className="mt-2 text-xs text-red-500 font-medium">{localCouponError}</p>}
             {appliedCoupon && (
-              <div className="mt-3 flex items-center justify-between rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-xs text-emerald-800">
-                <span className="flex items-center gap-1.5 font-medium">
-                  <Check size={14} className="text-emerald-600" />
-                  Code <strong>{appliedCoupon.code}</strong> applied
-                </span>
+              <div className="mt-3 flex items-center justify-between rounded-lg bg-emerald-50 border border-emerald-200 p-2.5 text-xs text-emerald-800 animate-in fade-in">
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Check size={14} className="text-emerald-600 shrink-0" />
+                  <div>
+                    <span>Code <strong>{appliedCoupon.code}</strong> applied</span>
+                    {appliedCoupon.isProductSpecific && (
+                      <span className="ml-1 text-[10px] text-purple-700 bg-purple-100 px-1 py-0.5 rounded font-semibold">
+                        Eligible Items
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <button
                   type="button"
-                  onClick={() => { setAppliedCoupon(null); setCouponCode(""); }}
-                  className="text-[10px] text-emerald-700 hover:underline font-bold"
+                  onClick={() => removeCoupon()}
+                  className="text-[11px] text-rose-600 hover:text-rose-800 font-bold ml-2 shrink-0"
                 >
                   Remove
                 </button>

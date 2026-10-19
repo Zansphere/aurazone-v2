@@ -5,29 +5,30 @@ const REAPER_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 let reaperTimer: NodeJS.Timeout | null = null;
 
 /**
- * Cart reaper — finds and releases expired InventoryReservation records.
+ * Cart reaper — safely finds and releases expired InventoryReservation records.
  *
- * How it works:
- * 1. SELECT expired reservations (expiresAt <= now) with FOR UPDATE SKIP LOCKED
- *    semantics via an atomic claim pattern.
- * 2. For each expired reservation, in a single transaction:
- *    a. Delete the reservation record
- *    b. Decrement the variant's `reserved` counter by exactly the reservation qty
- *    c. Log it
- * 3. Mark any carts whose items have no remaining reservations as ABANDONED.
- *
- * Because reservations are owned by specific cart items, releasing one cart's
- * hold cannot interfere with another cart's reservation for the same variant.
- * The atomic delete-if-exists pattern prevents duplicate processing across
- * multiple API replicas.
+ * Concurrency & Integrity Invariants:
+ * 1. Only reaps reservations in ACTIVE status.
+ * 2. Never reaps reservations for carts that have already been converted to an order (status = ORDERED).
+ * 3. Atomic state transition: ACTIVE → EXPIRED. If another replica processes it simultaneously,
+ *    the update count is 0 and it skips safely.
+ * 4. Records balanceAfter and reservedAfter in append-only InventoryLog.
  */
 export async function runCartReaper() {
   try {
     const now = new Date();
 
-    // Find all expired reservations
+    // Find all expired ACTIVE reservations for carts that are still ACTIVE
     const expiredReservations = await prisma.inventoryReservation.findMany({
-      where: { expiresAt: { lte: now } },
+      where: {
+        status: "ACTIVE",
+        expiresAt: { lte: now },
+        cartItem: {
+          cart: {
+            status: "ACTIVE",
+          },
+        },
+      },
       include: {
         cartItem: { include: { cart: true } },
       },
@@ -35,33 +36,45 @@ export async function runCartReaper() {
 
     if (expiredReservations.length === 0) return;
 
-    console.log(`[CartReaper] Found ${expiredReservations.length} expired reservations. Releasing...`);
+    console.log(`[CartReaper] Found ${expiredReservations.length} expired reservations to release.`);
 
     const affectedCartIds = new Set<string>();
 
     for (const reservation of expiredReservations) {
       try {
         await prisma.$transaction(async (tx) => {
-          // Atomically claim: delete the reservation. If another replica already
-          // deleted it, deleteMany returns count=0 and we skip.
-          const deleted = await tx.inventoryReservation.deleteMany({
-            where: { id: reservation.id },
+          // Atomically claim the expired reservation: ACTIVE → EXPIRED
+          const claimed = await tx.inventoryReservation.updateMany({
+            where: {
+              id: reservation.id,
+              status: "ACTIVE",
+            },
+            data: {
+              status: "EXPIRED",
+            },
           });
-          if (deleted.count === 0) return; // already processed by another replica
 
-          // Release the reserved amount from the scalar counter
-          await tx.$executeRaw`
+          if (claimed.count === 0) return; // Already claimed/released by another worker
+
+          // Release the reserved count
+          const result: Array<{ quantity: number; reserved: number }> = await tx.$queryRaw`
             UPDATE "Inventory"
             SET reserved = GREATEST(reserved - ${reservation.quantity}, 0)
             WHERE variant_id = ${reservation.variantId}
+            RETURNING quantity, reserved
           `;
+
+          const currentInv = result[0] ?? { quantity: 0, reserved: 0 };
 
           await tx.inventoryLog.create({
             data: {
               variantId: reservation.variantId,
-              quantity: reservation.quantity,
+              quantity: -reservation.quantity,
+              balanceAfter: currentInv.quantity,
+              reservedAfter: currentInv.reserved,
               type: "RELEASE",
-              note: `Cart reaper released expired reservation for cart item ${reservation.cartItemId}`,
+              note: `Cart reaper expired reservation for cart item ${reservation.cartItemId}`,
+              correlationId: reservation.cartItemId,
             },
           });
         });
@@ -74,12 +87,14 @@ export async function runCartReaper() {
 
     // Mark affected carts as ABANDONED if they have no remaining active reservations
     for (const cartId of affectedCartIds) {
-      const remainingReservations = await prisma.inventoryReservation.count({
-        where: { cartItem: { cartId } },
+      const remainingActive = await prisma.inventoryReservation.count({
+        where: {
+          cartItem: { cartId },
+          status: "ACTIVE",
+        },
       });
 
-      if (remainingReservations === 0) {
-        // Atomic: only flip ACTIVE → ABANDONED
+      if (remainingActive === 0) {
         await prisma.cart.updateMany({
           where: { id: cartId, status: "ACTIVE" },
           data: { status: "ABANDONED" },
@@ -87,7 +102,7 @@ export async function runCartReaper() {
       }
     }
 
-    console.log(`[CartReaper] Released ${expiredReservations.length} reservations, checked ${affectedCartIds.size} carts.`);
+    console.log(`[CartReaper] Successfully processed ${expiredReservations.length} reservations.`);
   } catch (error) {
     console.error("[CartReaper] Error running cart reaper:", error);
   }
@@ -95,7 +110,6 @@ export async function runCartReaper() {
 
 export function startCartReaper() {
   if (reaperTimer) return;
-  // Run immediately on startup, then on interval
   runCartReaper();
   reaperTimer = setInterval(runCartReaper, REAPER_INTERVAL_MS);
   console.log(`[CartReaper] Started with interval ${REAPER_INTERVAL_MS}ms`);

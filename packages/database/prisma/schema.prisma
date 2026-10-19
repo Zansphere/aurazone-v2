@@ -55,6 +55,37 @@ enum PaymentStatus {
   SUCCESS
   FAILED
   REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum ReservationStatus {
+  ACTIVE
+  CONSUMED
+  RELEASED
+  EXPIRED
+}
+
+enum IdempotencyStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+enum RefundStatus {
+  REQUESTED
+  VALIDATED
+  PENDING
+  SUCCEEDED
+  FAILED
+  REJECTED
 }
 
 enum PaymentGateway {
@@ -149,6 +180,8 @@ model User {
   notificationHistory     NotificationHistory[]
   notificationPreferences NotificationPreferences?
   reviews                 ProductReview[]
+  refundsAdmin            Refund[]                @relation("RefundAdminActor")
+  couponUsages            CouponUsage[]
 
   @@index([email])
   @@index([phone])
@@ -343,6 +376,7 @@ model Product {
   cartItems     CartItem[]
   wishlistItems WishlistItem[]
   reviews       ProductReview[]
+  couponProducts CouponProduct[]
 
   @@index([storeId])
   @@index([categoryId])
@@ -416,33 +450,42 @@ model Inventory {
 }
 
 model InventoryReservation {
-  id         String         @id @default(uuid())
-  variantId  String         @map("variant_id")
-  variant    ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  cartItemId String         @unique @map("cart_item_id")
-  cartItem   CartItem       @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  id         String            @id @default(uuid())
+  variantId  String            @map("variant_id")
+  variant    ProductVariant    @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  cartItemId String            @unique @map("cart_item_id")
+  cartItem   CartItem          @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
   quantity   Int
-  expiresAt  DateTime       @map("expires_at")
-  createdAt  DateTime       @default(now()) @map("created_at")
+  status     ReservationStatus @default(ACTIVE)
+  orderId    String?           @map("order_id")
+  order      Order?            @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  expiresAt  DateTime          @map("expires_at")
+  createdAt  DateTime          @default(now()) @map("created_at")
 
   @@index([variantId])
+  @@index([status])
+  @@index([orderId])
   @@index([expiresAt])
 }
 
 model InventoryLog {
-  id          String           @id @default(uuid())
-  variantId   String           @map("variant_id")
-  variant     ProductVariant   @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  orderId     String?          @map("order_id")
-  order       Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  quantity    Int
-  type        InventoryLogType
-  performedBy String?          @map("performed_by")
-  note        String?
-  createdAt   DateTime         @default(now()) @map("created_at")
+  id            String           @id @default(uuid())
+  variantId     String           @map("variant_id")
+  variant       ProductVariant   @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  orderId       String?          @map("order_id")
+  order         Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  quantity      Int
+  balanceAfter  Int?             @map("balance_after")
+  reservedAfter Int?             @map("reserved_after")
+  type          InventoryLogType
+  performedBy   String?          @map("performed_by")
+  note          String?
+  correlationId String?          @map("correlation_id")
+  createdAt     DateTime         @default(now()) @map("created_at")
 
   @@index([variantId])
   @@index([orderId])
+  @@index([correlationId])
 }
 
 // ─── Reviews ─────────────────────────────────────────────────────────────────
@@ -564,7 +607,10 @@ model Order {
   paymentLogs     PaymentLog[]
   statusEmailLogs OrderStatusEmailLog[]
   inventoryLogs   InventoryLog[]
+  refunds         Refund[]
+  reservations    InventoryReservation[]
   orderAddress    OrderAddress?
+  couponUsages    CouponUsage[]
 
   @@index([orderNumber])
   @@index([trackingToken])
@@ -632,6 +678,7 @@ model Payment {
   updatedAt         DateTime       @updatedAt @map("updated_at")
 
   paymentLogs PaymentLog[]
+  refunds     Refund[]
 
   @@unique([gateway, gatewayPaymentId])
   @@index([orderId])
@@ -850,26 +897,149 @@ model NotificationPreferences {
 // ─── Coupons & Promotions ──────────────────────────────────────────────────
 
 model Coupon {
-  id              String         @id @default(uuid())
-  code            String         @unique
-  description     String?
-  discountType    DiscountType   @map("discount_type")
-  discountValue   Decimal        @db.Decimal(10, 2) @map("discount_value")
-  minOrderValue   Decimal?       @db.Decimal(10, 2) @map("min_order_value")
-  maxDiscount     Decimal?       @db.Decimal(10, 2) @map("max_discount")
-  usageLimit      Int?           @map("usage_limit")
-  usedCount       Int            @default(0) @map("used_count")
-  startDate       DateTime?      @map("start_date")
-  endDate         DateTime?      @map("end_date")
-  isActive        Boolean        @default(true) @map("is_active")
-  storeId         String?        @map("store_id")
-  store           Store?         @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  createdAt       DateTime       @default(now()) @map("created_at")
-  updatedAt       DateTime?      @updatedAt @map("updated_at")
+  id                String          @id @default(uuid())
+  code              String          @unique
+  description       String?
+  discountType      DiscountType    @map("discount_type")
+  discountValue     Decimal         @db.Decimal(10, 2) @map("discount_value")
+  minOrderValue     Decimal?        @db.Decimal(10, 2) @map("min_order_value")
+  maxDiscount       Decimal?        @db.Decimal(10, 2) @map("max_discount")
+  usageLimit        Int?            @map("usage_limit")
+  usedCount         Int             @default(0) @map("used_count")
+  startDate         DateTime?       @map("start_date")
+  endDate           DateTime?       @map("end_date")
+  isActive          Boolean         @default(true) @map("is_active")
+  isProductSpecific Boolean         @default(false) @map("is_product_specific")
+  showInStorefront  Boolean         @default(false) @map("show_in_storefront")
+  bannerText        String?         @map("banner_text")
+  bannerColor       String?         @map("banner_color")
+  storeId           String?         @map("store_id")
+  store             Store?          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime?       @updatedAt @map("updated_at")
 
-  orders          Order[]
+  orders            Order[]
+  usages            CouponUsage[]
+  products          CouponProduct[]
 
   @@index([code])
   @@index([storeId])
   @@index([isActive])
+  @@index([showInStorefront])
+}
+
+model CouponProduct {
+  id        String   @id @default(uuid())
+  couponId  String   @map("coupon_id")
+  coupon    Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  productId String   @map("product_id")
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([couponId, productId])
+  @@index([couponId])
+  @@index([productId])
+}
+
+model CouponUsage {
+  id        String   @id @default(uuid())
+  couponId  String   @map("coupon_id")
+  coupon    Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId    String?  @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String?  @map("email")
+  orderId   String?  @map("order_id")
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([couponId, userId])
+  @@index([couponId, email])
+  @@index([userId])
+}
+
+// ─── Idempotency & Concurrency ──────────────────────────────────────────────
+
+model IdempotencyRecord {
+  id           String            @id @default(uuid())
+  key          String            @unique
+  scope        String            @db.VarChar(50)
+  userId       String?           @map("user_id")
+  sessionId    String?           @map("session_id")
+  requestHash  String            @map("request_hash")
+  status       IdempotencyStatus @default(PENDING)
+  responseCode Int?              @map("response_code")
+  responseBody Json?             @map("response_body")
+  lockedAt     DateTime          @default(now()) @map("locked_at")
+  expiresAt    DateTime          @map("expires_at")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  @@index([key])
+  @@index([scope, userId])
+  @@index([scope, sessionId])
+  @@index([expiresAt])
+}
+
+// ─── Webhook Deduplication ──────────────────────────────────────────────────
+
+model WebhookEvent {
+  id          String             @id @default(uuid())
+  provider    PaymentGateway     @default(RAZORPAY)
+  eventId     String             @unique @map("event_id")
+  eventType   String             @map("event_type")
+  payload     Json
+  status      WebhookEventStatus @default(RECEIVED)
+  attempts    Int                @default(0)
+  lastError   String?            @map("last_error")
+  processedAt DateTime?          @map("processed_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  @@index([eventId])
+  @@index([provider, status])
+  @@index([createdAt])
+}
+
+// ─── Refunds ────────────────────────────────────────────────────────────────
+
+model Refund {
+  id              String         @id @default(uuid())
+  orderId         String         @map("order_id")
+  order           Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  paymentId       String?        @map("payment_id")
+  payment         Payment?       @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  amount          Decimal        @db.Decimal(12, 2)
+  currency        String         @default("INR")
+  status          RefundStatus   @default(REQUESTED)
+  reason          String?
+  gateway         PaymentGateway @default(RAZORPAY)
+  gatewayRefundId String?        @unique @map("gateway_refund_id")
+  idempotencyKey  String?        @unique @map("idempotency_key")
+  adminId         String?        @map("admin_id")
+  admin           User?          @relation("RefundAdminActor", fields: [adminId], references: [id], onDelete: SetNull)
+  metadata        Json?
+  failureReason   String?        @map("failure_reason")
+  processedAt     DateTime?      @map("processed_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  logs RefundLog[]
+
+  @@index([orderId])
+  @@index([paymentId])
+  @@index([status])
+  @@index([gatewayRefundId])
+}
+
+model RefundLog {
+  id         String        @id @default(uuid())
+  refundId   String        @map("refund_id")
+  refund     Refund        @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  fromStatus RefundStatus? @map("from_status")
+  toStatus   RefundStatus  @map("to_status")
+  actorId    String?       @map("actor_id")
+  note       String?
+  metadata   Json?
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  @@index([refundId])
 }

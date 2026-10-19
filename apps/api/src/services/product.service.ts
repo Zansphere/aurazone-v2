@@ -1,5 +1,7 @@
 import { prisma, type Product, type Prisma } from "@aurazone/database";
 import { slugify, buildSku } from "@aurazone/utils";
+import crypto from "crypto";
+import type { Redis } from "ioredis";
 import { logAction } from "./auditLog.service.js";
 
 export async function listProducts(opts?: {
@@ -13,14 +15,65 @@ export async function listProducts(opts?: {
   inStock?: boolean;
   isActive?: boolean;
   includeDeleted?: boolean;
+  couponCode?: string;
   sortBy?: string;
   skip?: number;
   take?: number;
+  redis?: Redis | null;
 }): Promise<{ products: Product[]; total: number }> {
+  const cacheKey = opts?.redis
+    ? `products:list:${crypto
+        .createHash("md5")
+        .update(
+          JSON.stringify({
+            storeId: opts.storeId,
+            storeIds: opts.storeIds,
+            categoryId: opts.categoryId,
+            brand: opts.brand,
+            search: opts.search,
+            minPrice: opts.minPrice,
+            maxPrice: opts.maxPrice,
+            inStock: opts.inStock,
+            isActive: opts.isActive,
+            includeDeleted: opts.includeDeleted,
+            couponCode: opts.couponCode,
+            sortBy: opts.sortBy,
+            skip: opts.skip,
+            take: opts.take,
+          })
+        )
+        .digest("hex")}`
+    : null;
+
+  if (cacheKey && opts?.redis) {
+    try {
+      const cached = await opts.redis.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch {
+      // Fallback to database
+    }
+  }
+
   const where: Prisma.ProductWhereInput = {};
 
   // Exclude soft-deleted by default
   if (!opts?.includeDeleted) where.deletedAt = null;
+
+  if (opts?.couponCode) {
+    const coupon = await prisma.coupon.findUnique({
+      where: { code: opts.couponCode.toUpperCase() },
+      include: { products: { select: { productId: true } } },
+    });
+    if (coupon) {
+      if (coupon.isProductSpecific) {
+        where.id = { in: coupon.products.map((p) => p.productId) };
+      } else if (coupon.storeId) {
+        where.storeId = coupon.storeId;
+      }
+    }
+  }
 
   if (opts?.storeId) where.storeId = opts.storeId;
   else if (opts?.storeIds) where.storeId = { in: opts.storeIds };
@@ -105,7 +158,15 @@ export async function listProducts(opts?: {
 
     const skip = opts?.skip ?? 0;
     const take = opts?.take ?? 24;
-    return { products: sorted.slice(skip, skip + take), total };
+    const result = { products: sorted.slice(skip, skip + take), total };
+    if (cacheKey && opts?.redis) {
+      try {
+        await opts.redis.set(cacheKey, JSON.stringify(result), "EX", 120); // 2 min TTL
+      } catch {
+        // Non-blocking
+      }
+    }
+    return result;
   }
 
   const [products, total] = await Promise.all([
@@ -131,10 +192,31 @@ export async function listProducts(opts?: {
     prisma.product.count({ where }),
   ]);
 
-  return { products, total };
+  const result = { products, total };
+  if (cacheKey && opts?.redis) {
+    try {
+      await opts.redis.set(cacheKey, JSON.stringify(result), "EX", 120); // 2 min TTL
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  return result;
 }
 
-export async function getProductBySlug(slug: string) {
+export async function getProductBySlug(slug: string, redis?: Redis | null) {
+  const cacheKey = `product:slug:${slug}`;
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch {
+      // Fallback to database
+    }
+  }
+
   const product = await prisma.product.findUnique({
     where: { slug },
     include: {
@@ -152,10 +234,72 @@ export async function getProductBySlug(slug: string) {
     },
   });
   if (!product || product.deletedAt) throw Object.assign(new Error("Product not found"), { statusCode: 404 });
-  return product;
+
+  const now = new Date();
+  const applicableCoupons = await prisma.coupon.findMany({
+    where: {
+      isActive: true,
+      OR: [{ startDate: null }, { startDate: { lte: now } }],
+      AND: [
+        { OR: [{ endDate: null }, { endDate: { gte: now } }] },
+        {
+          OR: [
+            {
+              isProductSpecific: true,
+              products: { some: { productId: product.id } },
+            },
+            {
+              isProductSpecific: false,
+              OR: [{ storeId: null }, { storeId: product.storeId }],
+            },
+          ],
+        },
+      ],
+    },
+    select: {
+      id: true,
+      code: true,
+      description: true,
+      discountType: true,
+      discountValue: true,
+      minOrderValue: true,
+      maxDiscount: true,
+      endDate: true,
+      isProductSpecific: true,
+      bannerText: true,
+    },
+    orderBy: { discountValue: "desc" },
+  });
+
+  const result = {
+    ...product,
+    applicableCoupons,
+  };
+
+  if (redis) {
+    try {
+      await redis.set(cacheKey, JSON.stringify(result), "EX", 300); // 5 min TTL
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  return result;
 }
 
-export async function getProductById(id: string) {
+export async function getProductById(id: string, redis?: Redis | null) {
+  const cacheKey = `product:id:${id}`;
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
   const product = await prisma.product.findUnique({
     where: { id },
     include: {
@@ -174,7 +318,54 @@ export async function getProductById(id: string) {
     },
   });
   if (!product) throw Object.assign(new Error("Product not found"), { statusCode: 404 });
+
+  if (redis) {
+    try {
+      await redis.set(cacheKey, JSON.stringify(product), "EX", 300); // 5 min TTL
+    } catch {
+      // Non-blocking
+    }
+  }
+
   return product;
+}
+
+export async function invalidateProductCache(
+  product: { id?: string; slug?: string; storeId?: string },
+  redis?: Redis | null
+): Promise<void> {
+  if (!redis) return;
+  try {
+    const keysToDelete: string[] = [];
+    if (product.id) keysToDelete.push(`product:id:${product.id}`);
+    if (product.slug) keysToDelete.push(`product:slug:${product.slug}`);
+
+    // Invalidate list queries via SCAN
+    let cursor = "0";
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, "MATCH", "products:list:*", "COUNT", 100);
+      cursor = nextCursor;
+      if (keys && keys.length > 0) {
+        keysToDelete.push(...keys);
+      }
+    } while (cursor !== "0");
+
+    // Also clear search query cache
+    cursor = "0";
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, "MATCH", "search:*", "COUNT", 100);
+      cursor = nextCursor;
+      if (keys && keys.length > 0) {
+        keysToDelete.push(...keys);
+      }
+    } while (cursor !== "0");
+
+    if (keysToDelete.length > 0) {
+      await redis.del(...keysToDelete);
+    }
+  } catch (err) {
+    console.error("[ProductCache] Invalidation error:", err);
+  }
 }
 
 export async function createProduct(
@@ -201,7 +392,8 @@ export async function createProduct(
       images?: any[];
     }>;
   },
-  adminId?: string
+  adminId?: string,
+  redis?: Redis | null
 ): Promise<Product> {
   const [store, category] = await Promise.all([
     prisma.store.findUnique({ where: { id: data.storeId } }),
@@ -272,6 +464,8 @@ export async function createProduct(
     });
   }
 
+  await invalidateProductCache({ id: product.id, slug: product.slug, storeId: product.storeId }, redis);
+
   return product;
 }
 
@@ -286,7 +480,8 @@ export async function updateProduct(
     tags: string[];
     variants?: any[];
   }>,
-  adminId?: string
+  adminId?: string,
+  redis?: Redis | null
 ): Promise<Product> {
   const product = await prisma.product.findUnique({ where: { id } });
   if (!product) throw Object.assign(new Error("Product not found"), { statusCode: 404 });
@@ -417,10 +612,15 @@ export async function updateProduct(
     });
   }
 
+  await invalidateProductCache({ id: updated.id, slug: updated.slug, storeId: updated.storeId }, redis);
+  if (product.slug !== updated.slug) {
+    await invalidateProductCache({ slug: product.slug }, redis);
+  }
+
   return updated;
 }
 
-export async function deleteProduct(id: string, adminId?: string): Promise<void> {
+export async function deleteProduct(id: string, adminId?: string, redis?: Redis | null): Promise<void> {
   const product = await prisma.product.findUnique({
     where: { id },
     include: {
@@ -444,9 +644,11 @@ export async function deleteProduct(id: string, adminId?: string): Promise<void>
       entityName: product.name,
     });
   }
+
+  await invalidateProductCache({ id: product.id, slug: product.slug, storeId: product.storeId }, redis);
 }
 
-export async function restoreProduct(id: string, adminId?: string): Promise<Product> {
+export async function restoreProduct(id: string, adminId?: string, redis?: Redis | null): Promise<Product> {
   const product = await prisma.product.findUnique({ where: { id } });
   if (!product) throw Object.assign(new Error("Product not found"), { statusCode: 404 });
   if (!product.deletedAt) {
@@ -468,6 +670,8 @@ export async function restoreProduct(id: string, adminId?: string): Promise<Prod
       entityName: restored.name,
     });
   }
+
+  await invalidateProductCache({ id: restored.id, slug: restored.slug, storeId: restored.storeId }, redis);
 
   return restored;
 }

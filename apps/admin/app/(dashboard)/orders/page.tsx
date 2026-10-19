@@ -41,6 +41,16 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
 
 const ORDER_STATUSES = ["PENDING", "RECEIVED", "SHIPPED", "DELIVERED", "SUCCESS", "CANCELLED"];
 
+const ALLOWED_ORDER_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ["RECEIVED", "CANCELLED", "FAILED"],
+  RECEIVED: ["SHIPPED", "CANCELLED"],
+  SHIPPED: ["DELIVERED", "CANCELLED"],
+  DELIVERED: ["SUCCESS"],
+  SUCCESS: [],
+  CANCELLED: [],
+  FAILED: [],
+};
+
 export default function OrdersPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
@@ -58,6 +68,9 @@ export default function OrdersPage() {
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       api.patch(`/admin/orders/${id}/status`, { status }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "orders"] }),
+    onError: (err: any) => {
+      alert(err.message || "Failed to update order status");
+    },
   });
 
   const orders = data?.data ?? [];
@@ -216,20 +229,34 @@ export default function OrdersPage() {
                       })}
                     </td>
                     <td className="px-5 py-3">
-                      <select
-                        value={order.status}
-                        disabled={["DELIVERED", "SUCCESS", "CANCELLED"].includes(order.status)}
-                        onChange={(e) =>
-                          updateStatusMutation.mutate({ id: order.id, status: e.target.value })
-                        }
-                        className="form-input py-1 px-2 text-xs w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {ORDER_STATUSES.map((s) => (
-                          <option key={s} value={s}>
-                            {s.charAt(0) + s.slice(1).toLowerCase()}
-                          </option>
-                        ))}
-                      </select>
+                      {(() => {
+                        const validNext = ALLOWED_ORDER_TRANSITIONS[order.status] || [];
+                        const isTerminal = validNext.length === 0;
+                        return (
+                          <select
+                            value={order.status}
+                            disabled={isTerminal || updateStatusMutation.isPending}
+                            onChange={(e) => {
+                              const newStatus = e.target.value;
+                              if (newStatus === order.status) return;
+                              if (newStatus === "CANCELLED") {
+                                if (!window.confirm(`Are you sure you want to cancel order ${order.orderNumber}? This will restock inventory.`)) return;
+                              }
+                              updateStatusMutation.mutate({ id: order.id, status: newStatus });
+                            }}
+                            className="form-input py-1 px-2 text-xs w-full disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                          >
+                            <option value={order.status}>
+                              {order.status.charAt(0) + order.status.slice(1).toLowerCase()} (Current)
+                            </option>
+                            {validNext.map((s) => (
+                              <option key={s} value={s}>
+                                → {s.charAt(0) + s.slice(1).toLowerCase()}
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}

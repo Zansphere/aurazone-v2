@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { loginSchema, signupSchema, forgotPasswordSchema, resetPasswordSchema } from "@aurazone/validators";
 import { authenticate, setAuthCookies, clearAuthCookies } from "../../middleware/auth.js";
-import { sendSuccess, sendError } from "../../middleware/response.js";
+import { sendSuccess, sendError, handleRouteError } from "../../middleware/response.js";
 import * as authService from "../../services/auth.service.js";
 import { EmailService } from "../../services/email.service.js";
 import { env } from "../../config/env.js";
@@ -57,8 +57,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
         refreshToken,
       }, 201);
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -95,8 +94,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
         refreshToken,
       });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -106,8 +104,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
       const user = await authService.getCurrentUser(request.user!.userId);
       return sendSuccess(reply, { user });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -123,8 +120,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
         user: { id: user.id, email: user.email, isEmailVerified: user.isEmailVerified },
       });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 400);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -136,8 +132,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
       await EmailService.sendEmailVerification(request.user!.email, verifyUrl);
       return sendSuccess(reply, { message: "Verification email sent" });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 400);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -153,9 +148,8 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
       setAuthCookies(reply, tokens.accessToken, tokens.refreshToken);
       return sendSuccess(reply, { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
       clearAuthCookies(reply);
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 
@@ -218,8 +212,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
       await authService.resetPassword(parsed.data.token, parsed.data.password);
       return sendSuccess(reply, { message: "Password reset successfully" });
     } catch (err: unknown) {
-      const error = err as Error & { statusCode?: number };
-      return sendError(reply, error.message, error.statusCode ?? 500);
+      return handleRouteError(reply, err);
     }
   });
 };

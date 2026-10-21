@@ -42,17 +42,49 @@ const buildServer = async () => {
   // ─── Plugins ──────────────────────────────────────────────────
   await app.register(fastifyCors, {
     origin: (origin, cb) => {
+      // Allow requests with no origin (e.g. server-to-server, curl)
+      if (!origin) {
+        cb(null, true);
+        return;
+      }
+
       const allowed = [
         env.CUSTOMER_URL,
         env.ADMIN_URL,
+        "https://aurazone.shop",
+        "https://www.aurazone.shop",
+        "https://admin.aurazone.shop",
+        "https://api.aurazone.shop",
+        "http://localhost:3000",
+        "http://localhost:3001",
       ].filter(Boolean);
-      if (!origin || allowed.includes(origin) || origin.endsWith(".aurazone.com")) {
+
+      const isAllowed =
+        allowed.includes(origin) ||
+        origin.endsWith(".aurazone.shop") ||
+        origin.endsWith(".aurazone.com") ||
+        origin.includes("localhost") ||
+        origin.includes("127.0.0.1");
+
+      if (isAllowed) {
         cb(null, true);
       } else {
-        cb(new Error("CORS: origin not allowed"), false);
+        cb(null, false);
       }
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Origin",
+      "X-Requested-With",
+      "Content-Type",
+      "Accept",
+      "Authorization",
+      "X-Session-ID",
+      "X-Store-ID",
+      "X-Guest-Session",
+      "Cookie",
+    ],
   });
 
   await app.register(fastifyCookie, {

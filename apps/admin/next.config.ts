@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "**.amazonaws.com" },
       { protocol: "https", hostname: "**.aurazone.com" },
+      { protocol: "https", hostname: "**.aurazone.shop" },
     ],
   },
 };

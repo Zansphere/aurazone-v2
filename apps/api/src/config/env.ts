@@ -1,6 +1,11 @@
+import path from "path";
 import dotenv from "dotenv";
 
-dotenv.config({ path: "../../.env" });
+// Load .env whether started from apps/api or repo root
+dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
 
 export const env = {
   // Server

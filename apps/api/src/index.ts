@@ -1,5 +1,5 @@
-import { buildServer } from "./server.js";
 import { env } from "./config/env.js";
+import { buildServer } from "./server.js";
 import { startCartReaper } from "./jobs/cart-reaper.js";
 
 const start = async () => {

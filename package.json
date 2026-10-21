@@ -11,6 +11,7 @@
     "db:migrate": "dotenv -e .env -- pnpm --filter @aurazone/database db:migrate",
     "db:migrate:dev": "dotenv -e .env -- pnpm --filter @aurazone/database run db:migrate:dev",
     "db:seed": "dotenv -e .env -- pnpm --filter @aurazone/database db:seed",
+    "db:reset": "dotenv -e .env -- pnpm --filter @aurazone/database exec prisma migrate reset",
     "db:studio": "dotenv -e .env -- pnpm --filter @aurazone/database db:studio"
   },
   "devDependencies": {

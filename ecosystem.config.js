@@ -7,6 +7,7 @@ module.exports = {
       args: "--filter @aurazone/api start",
       env: {
         NODE_ENV: "production",
+        PORT: 3102,
       },
       max_restarts: 10,
       restart_delay: 5000,

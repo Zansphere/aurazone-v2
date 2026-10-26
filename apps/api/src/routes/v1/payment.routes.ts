@@ -6,6 +6,7 @@ import { sendSuccess, sendError } from "../../middleware/response.js";
 import { env } from "../../config/env.js";
 import * as orderService from "../../services/order.service.js";
 import { transitionOrderStatus } from "../../services/orderStateMachine.js";
+import { EmailService } from "../../services/email.service.js";
 import { toPaise, toRupees } from "@aurazone/utils";
 
 const paymentRoutes: FastifyPluginAsync = async (fastify) => {
@@ -174,6 +175,21 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
         },
       });
     });
+
+    // Send order confirmation / RECEIVED status update
+    try {
+      const email = payment.order.userId
+        ? (await prisma.user.findUnique({ where: { id: payment.order.userId } }))?.email
+        : payment.order.notes?.match(/Guest Email: ([^\s]+)/)?.[1];
+
+      if (email) {
+        EmailService.sendOrderStatusUpdate(email, payment.order.orderNumber, "RECEIVED").catch((e) => {
+          console.error("[PaymentRoutes] Failed to send order status update email:", e);
+        });
+      }
+    } catch (e) {
+      console.error("[PaymentRoutes] Non-blocking payment email error:", e);
+    }
 
     return sendSuccess(reply, { message: "Payment verified successfully", orderId: payment.orderId });
   });
@@ -350,6 +366,21 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
                 },
               });
             });
+
+            // Send order confirmation / RECEIVED status update
+            try {
+              const email = payment.order.userId
+                ? (await prisma.user.findUnique({ where: { id: payment.order.userId } }))?.email
+                : payment.order.notes?.match(/Guest Email: ([^\s]+)/)?.[1];
+
+              if (email) {
+                EmailService.sendOrderStatusUpdate(email, payment.order.orderNumber, "RECEIVED").catch((e) => {
+                  console.error("[Webhook] Failed to send order status update email:", e);
+                });
+              }
+            } catch (e) {
+              console.error("[Webhook] Non-blocking payment email error:", e);
+            }
           }
           break;
         }

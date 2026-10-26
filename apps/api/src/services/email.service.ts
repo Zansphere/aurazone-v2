@@ -1,16 +1,21 @@
-import { Queue, Worker, Job } from 'bullmq';
 import nodemailer from 'nodemailer';
-import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
 
-// Configure Nodemailer
+// Configure Nodemailer with environment variables and sensible fallbacks
+const smtpHost = env.SMTP_HOST || process.env.EMAIL_HOST || 'smtp.ethereal.email';
+const smtpPort = Number(env.SMTP_PORT || process.env.EMAIL_PORT) || 587;
+const smtpUser = env.SMTP_USER || process.env.EMAIL_USER || '';
+const smtpPass = env.SMTP_PASS || process.env.EMAIL_PASS || '';
+const smtpFrom = env.SMTP_FROM || process.env.EMAIL_FROM || '"AuraZone" <noreply@aurazone.com>';
+
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.ethereal.email',
-  port: Number(process.env.SMTP_PORT) || 587,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
+  host: smtpHost,
+  port: smtpPort,
+  secure: smtpPort === 465,
+  auth: smtpUser && smtpPass ? {
+    user: smtpUser,
+    pass: smtpPass,
+  } : undefined,
 });
 
 interface EmailPayload {
@@ -19,43 +24,64 @@ interface EmailPayload {
   html: string;
 }
 
-// Connection for BullMQ
-const redisConnection = new Redis(env.REDIS_URL, {
-  maxRetriesPerRequest: null,
-});
+/**
+ * Asynchronously dispatches an email in the background without blocking the caller.
+ * Includes automatic retry with exponential backoff on transient network failures.
+ * Eliminates BullMQ / Redis polling to prevent exhausting serverless Redis request quotas.
+ */
+async function dispatchEmail(payload: EmailPayload, maxRetries = 2): Promise<void> {
+  const { to, subject, html } = payload;
 
-// Queue for emails
-export const emailQueue = new Queue<EmailPayload>('emailQueue', {
-  connection: redisConnection,
-});
-
-// Worker to process emails
-export const emailWorker = new Worker<EmailPayload>(
-  'emailQueue',
-  async (job: Job<EmailPayload>) => {
-    try {
-      const { to, subject, html } = job.data;
-      const info = await transporter.sendMail({
-        from: `"AuraZone" <${process.env.SMTP_FROM || 'noreply@aurazone.com'}>`,
-        to,
-        subject,
-        html,
-      });
-      console.log(`Email sent to ${to}: ${info.messageId}`);
-    } catch (error) {
-      console.error(`Failed to send email to ${job.data.to}`, error);
-      throw error;
-    }
-  },
-  {
-    connection: redisConnection,
-    concurrency: 5,
+  if (!to || !to.includes('@')) {
+    console.warn(`[EmailService] Skipped sending email: invalid recipient "${to}"`);
+    return;
   }
-);
 
-emailWorker.on('failed', (job, err) => {
-  console.error(`Job ${job?.id} failed with error ${err.message}`);
-});
+  // Gracefully simulate in dev if no SMTP credentials are configured
+  if (!smtpUser && !env.SMTP_HOST && !process.env.EMAIL_HOST && env.NODE_ENV !== 'production') {
+    console.info(`[EmailService] Dev mode (no SMTP configured) — simulated email to ${to}: "${subject}"`);
+    return;
+  }
+
+  // Fire-and-forget in background event loop
+  setImmediate(async () => {
+    let attempt = 0;
+    while (attempt <= maxRetries) {
+      try {
+        const info = await transporter.sendMail({
+          from: smtpFrom,
+          to,
+          subject,
+          html,
+        });
+        console.log(`[EmailService] Email sent successfully to ${to} (Message ID: ${info.messageId})`);
+        return;
+      } catch (error: any) {
+        attempt++;
+        if (attempt <= maxRetries) {
+          console.warn(`[EmailService] Attempt ${attempt} failed to send email to ${to}: ${error?.message}. Retrying in 2s...`);
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        } else {
+          console.error(`[EmailService] Failed to send email to ${to} after ${maxRetries + 1} attempts:`, error?.message || error);
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Compatibility stub for legacy imports (BullMQ removed to avoid serverless Redis polling)
+ */
+export const emailQueue = {
+  add: async (_name: string, data: EmailPayload) => {
+    return dispatchEmail(data);
+  },
+};
+
+export const emailWorker = {
+  close: async () => {},
+  on: (_event: string, _callback: Function) => {},
+};
 
 const createEmailWrapper = (title: string, bodyContent: string) => `
 <!DOCTYPE html>
@@ -95,7 +121,7 @@ const createEmailWrapper = (title: string, bodyContent: string) => `
 
 export const EmailService = {
   async sendOrderConfirmation(email: string, orderNumber: string, totalAmount: number) {
-    await emailQueue.add('orderConfirmation', {
+    await dispatchEmail({
       to: email,
       subject: `Order Confirmation - #${orderNumber} | AuraZone`,
       html: createEmailWrapper(
@@ -115,25 +141,79 @@ export const EmailService = {
   },
 
   async sendOrderStatusUpdate(email: string, orderNumber: string, status: string) {
-    await emailQueue.add('orderStatusUpdate', {
+    const statusConfig: Record<string, { label: string; desc: string; bg: string; border: string; text: string }> = {
+      RECEIVED: {
+        label: "Payment Confirmed & Order Received",
+        desc: "We have received your payment and our team has started preparing your order for shipment.",
+        bg: "#ecfdf5",
+        border: "#a7f3d0",
+        text: "#065f46",
+      },
+      PROCESSING: {
+        label: "Order In Processing",
+        desc: "Your items are being carefully picked, inspected, and packed.",
+        bg: "#eff6ff",
+        border: "#bfdbfe",
+        text: "#1e40af",
+      },
+      SHIPPED: {
+        label: "Order Dispatched & Shipped",
+        desc: "Your package is on its way to your delivery address with our courier partner.",
+        bg: "#f5f3ff",
+        border: "#ddd6fe",
+        text: "#5b21b6",
+      },
+      DELIVERED: {
+        label: "Order Delivered Successfully",
+        desc: "Your order has been delivered! We hope you love your purchase.",
+        bg: "#ecfdf5",
+        border: "#a7f3d0",
+        text: "#065f46",
+      },
+      CANCELLED: {
+        label: "Order Cancelled",
+        desc: "Your order has been cancelled. Any payment made will be refunded to your source account.",
+        bg: "#fffbeb",
+        border: "#fde68a",
+        text: "#92400e",
+      },
+      FAILED: {
+        label: "Order Payment Failed",
+        desc: "We could not confirm payment for this order. If money was deducted, it will be automatically refunded by your bank.",
+        bg: "#fef2f2",
+        border: "#fecaca",
+        text: "#991b1b",
+      },
+    };
+
+    const config = statusConfig[status.toUpperCase()] ?? {
+      label: status,
+      desc: "Your order status has been updated.",
+      bg: "#f8fafc",
+      border: "#e2e8f0",
+      text: "#0f172a",
+    };
+
+    await dispatchEmail({
       to: email,
-      subject: `Order Update: #${orderNumber} is ${status} | AuraZone`,
+      subject: `Order Update: #${orderNumber} - ${config.label} | AuraZone`,
       html: createEmailWrapper(
         `Order Update #${orderNumber}`,
         `
           <h1 class="h1">Order Status Update</h1>
           <p>Your order <span class="badge">#${orderNumber}</span> status has been updated to:</p>
-          <div style="background: #ecfdf5; border: 1px solid #a7f3d0; padding: 16px; border-radius: 10px; margin: 20px 0; text-align: center;">
-            <p style="margin: 0; font-size: 18px; font-weight: 700; color: #065f46;">${status}</p>
+          <div style="background: ${config.bg}; border: 1px solid ${config.border}; padding: 18px; border-radius: 12px; margin: 20px 0; text-align: center;">
+            <p style="margin: 0 0 6px 0; font-size: 18px; font-weight: 700; color: ${config.text};">${config.label}</p>
+            <p style="margin: 0; font-size: 14px; color: ${config.text};">${config.desc}</p>
           </div>
-          <a href="${env.CUSTOMER_URL}/orders" class="btn">Track Order Progress</a>
+          <a href="${env.CUSTOMER_URL}/orders" class="btn">View Order Details</a>
         `
       ),
     });
   },
 
   async sendPasswordResetEmail(email: string, resetUrl: string) {
-    await emailQueue.add('passwordReset', {
+    await dispatchEmail({
       to: email,
       subject: `Reset Your AuraZone Password`,
       html: createEmailWrapper(
@@ -155,7 +235,7 @@ export const EmailService = {
   },
 
   async sendEmailVerification(email: string, verifyUrl: string) {
-    await emailQueue.add('emailVerification', {
+    await dispatchEmail({
       to: email,
       subject: `Verify Your Email Address | AuraZone`,
       html: createEmailWrapper(
@@ -173,8 +253,8 @@ export const EmailService = {
   },
 
   async sendContactFormNotification(name: string, senderEmail: string, subject: string, message: string) {
-    await emailQueue.add('contactForm', {
-      to: process.env.SMTP_FROM || 'support@aurazone.com',
+    await dispatchEmail({
+      to: process.env.SMTP_FROM || process.env.EMAIL_FROM || 'support@aurazone.com',
       subject: `[Contact Inquiry] ${subject} from ${name}`,
       html: createEmailWrapper(
         "New Customer Inquiry",

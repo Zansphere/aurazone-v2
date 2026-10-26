@@ -16,6 +16,14 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "images.unsplash.com" },
     ],
   },
+  async rewrites() {
+    return [
+      {
+        source: "/verify-email",
+        destination: "/verify",
+      },
+    ];
+  },
 };
 
 export default nextConfig;

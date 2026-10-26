@@ -39,7 +39,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Send verification email in background
       if (verificationToken) {
-        const verifyUrl = `${env.CUSTOMER_URL}/verify-email?token=${verificationToken}`;
+        const verifyUrl = `${env.CUSTOMER_URL}/verify?token=${verificationToken}`;
         EmailService.sendEmailVerification(user.email!, verifyUrl).catch((err) => {
           fastify.log.error(err, "Failed to send verification email");
         });
@@ -128,7 +128,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post("/resend-verification", { preHandler: [authenticate] }, async (request, reply) => {
     try {
       const rawToken = await authService.createEmailVerificationToken(request.user!.userId);
-      const verifyUrl = `${env.CUSTOMER_URL}/verify-email?token=${rawToken}`;
+      const verifyUrl = `${env.CUSTOMER_URL}/verify?token=${rawToken}`;
       await EmailService.sendEmailVerification(request.user!.email, verifyUrl);
       return sendSuccess(reply, { message: "Verification email sent" });
     } catch (err: unknown) {

@@ -340,31 +340,35 @@ export async function invalidateProductCache(
     if (product.id) keysToDelete.push(`product:id:${product.id}`);
     if (product.slug) keysToDelete.push(`product:slug:${product.slug}`);
 
-    // Invalidate list queries via SCAN
+    // Invalidate list queries via bounded SCAN (max 2 iterations to conserve Upstash command quotas)
     let cursor = "0";
+    let iterations = 0;
     do {
       const [nextCursor, keys] = await redis.scan(cursor, "MATCH", "products:list:*", "COUNT", 100);
       cursor = nextCursor;
       if (keys && keys.length > 0) {
         keysToDelete.push(...keys);
       }
-    } while (cursor !== "0");
+      iterations++;
+    } while (cursor !== "0" && iterations < 2);
 
-    // Also clear search query cache
+    // Also clear search query cache (bounded SCAN)
     cursor = "0";
+    iterations = 0;
     do {
-      const [nextCursor, keys] = await redis.scan(cursor, "MATCH", "search:*", "COUNT", 100);
+      const [nextCursor, keys] = await redis.scan(cursor, "MATCH", "cache:search:*", "COUNT", 100);
       cursor = nextCursor;
       if (keys && keys.length > 0) {
         keysToDelete.push(...keys);
       }
-    } while (cursor !== "0");
+      iterations++;
+    } while (cursor !== "0" && iterations < 2);
 
     if (keysToDelete.length > 0) {
       await redis.del(...keysToDelete);
     }
   } catch (err) {
-    console.error("[ProductCache] Invalidation error:", err);
+    console.warn("[ProductCache] Invalidation non-critical warning:", err);
   }
 }
 

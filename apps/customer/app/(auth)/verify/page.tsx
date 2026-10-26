@@ -1,23 +1,50 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { CheckCircle2, ShieldCheck } from "lucide-react";
+import { ShieldCheck, XCircle } from "lucide-react";
+import { api } from "@/lib/api";
 
 function VerifyForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
   
   const [verifying, setVerifying] = useState(true);
+  const [success, setSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    // Mocking email verification since there's no backend field for it currently
-    const timer = setTimeout(() => {
+    if (!token) {
       setVerifying(false);
-    }, 1500);
-    return () => clearTimeout(timer);
+      setSuccess(false);
+      setErrorMessage("No verification token provided. Please use the link sent to your email.");
+      return;
+    }
+
+    let isMounted = true;
+
+    async function verify() {
+      try {
+        await api.post("/auth/verify-email", { token });
+        if (isMounted) {
+          setSuccess(true);
+          setVerifying(false);
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          setSuccess(false);
+          setVerifying(false);
+          setErrorMessage(err.message || "Invalid or expired verification link. Please request a new one.");
+        }
+      }
+    }
+
+    verify();
+
+    return () => {
+      isMounted = false;
+    };
   }, [token]);
 
   return (
@@ -29,7 +56,7 @@ function VerifyForm() {
             <h1 className="text-xl font-bold text-[var(--color-text-primary)]">Verifying Email...</h1>
             <p className="mt-2 text-sm text-[var(--color-text-secondary)]">Please wait while we confirm your details.</p>
           </div>
-        ) : (
+        ) : success ? (
           <div>
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-green-600">
               <ShieldCheck size={32} />
@@ -45,6 +72,24 @@ function VerifyForm() {
               className="inline-flex w-full items-center justify-center rounded-xl bg-[var(--color-primary)] px-6 py-3 text-sm font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-colors"
             >
               Continue to Login
+            </Link>
+          </div>
+        ) : (
+          <div>
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-red-600">
+              <XCircle size={32} />
+            </div>
+            <h1 className="text-2xl font-bold font-[var(--font-heading)] text-[var(--color-text-primary)]">
+              Verification Failed
+            </h1>
+            <p className="mt-2 text-sm text-[var(--color-text-secondary)] mb-8">
+              {errorMessage}
+            </p>
+            <Link
+              href="/login"
+              className="inline-flex w-full items-center justify-center rounded-xl bg-[var(--color-primary)] px-6 py-3 text-sm font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-colors"
+            >
+              Back to Login
             </Link>
           </div>
         )}

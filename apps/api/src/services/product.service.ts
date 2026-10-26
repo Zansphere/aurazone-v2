@@ -236,40 +236,45 @@ export async function getProductBySlug(slug: string, redis?: Redis | null) {
   if (!product || product.deletedAt) throw Object.assign(new Error("Product not found"), { statusCode: 404 });
 
   const now = new Date();
-  const applicableCoupons = await prisma.coupon.findMany({
-    where: {
-      isActive: true,
-      OR: [{ startDate: null }, { startDate: { lte: now } }],
-      AND: [
-        { OR: [{ endDate: null }, { endDate: { gte: now } }] },
-        {
-          OR: [
-            {
-              isProductSpecific: true,
-              products: { some: { productId: product.id } },
-            },
-            {
-              isProductSpecific: false,
-              OR: [{ storeId: null }, { storeId: product.storeId }],
-            },
-          ],
-        },
-      ],
-    },
-    select: {
-      id: true,
-      code: true,
-      description: true,
-      discountType: true,
-      discountValue: true,
-      minOrderValue: true,
-      maxDiscount: true,
-      endDate: true,
-      isProductSpecific: true,
-      bannerText: true,
-    },
-    orderBy: { discountValue: "desc" },
-  });
+  let applicableCoupons: any[] = [];
+  try {
+    applicableCoupons = await prisma.coupon.findMany({
+      where: {
+        isActive: true,
+        OR: [{ startDate: null }, { startDate: { lte: now } }],
+        AND: [
+          { OR: [{ endDate: null }, { endDate: { gte: now } }] },
+          {
+            OR: [
+              {
+                isProductSpecific: true,
+                products: { some: { productId: product.id } },
+              },
+              {
+                isProductSpecific: false,
+                OR: [{ storeId: null }, { storeId: product.storeId }],
+              },
+            ],
+          },
+        ],
+      },
+      select: {
+        id: true,
+        code: true,
+        description: true,
+        discountType: true,
+        discountValue: true,
+        minOrderValue: true,
+        maxDiscount: true,
+        endDate: true,
+        isProductSpecific: true,
+        bannerText: true,
+      },
+      orderBy: { discountValue: "desc" },
+    });
+  } catch (couponErr) {
+    console.warn("[ProductService] Non-critical error fetching applicable coupons:", couponErr);
+  }
 
   const result = {
     ...product,

@@ -79,9 +79,12 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
       );
       const subtotal = toRupees(subtotalPaise);
 
+      const uniqueProductIds = new Set(cart.items.map((item) => item.productId));
+
       return sendSuccess(reply, {
         ...cart!,
-        itemCount: cart.items.reduce((sum, item) => sum + item.quantity, 0),
+        itemCount: uniqueProductIds.size,
+        totalQuantity: cart.items.reduce((sum, item) => sum + item.quantity, 0),
         subtotal,
       });
     } catch (e: unknown) {

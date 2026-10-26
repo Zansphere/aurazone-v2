@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Heart, Trash2, ShoppingCart, Package } from "lucide-react";
 import Link from "next/link";
+import { AuthGate } from "@/components/providers/AuthGate";
 
 export default function WishlistPage() {
   const queryClient = useQueryClient();
@@ -58,7 +59,8 @@ export default function WishlistPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <AuthGate pageLabel="your wishlist" icon={<Heart size={28} className="text-[var(--color-accent)]" />}>
+      <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-[var(--color-text-secondary)]">{items.length} item{items.length !== 1 ? "s" : ""}</p>
       </div>
@@ -141,6 +143,7 @@ export default function WishlistPage() {
           );
         })}
       </div>
-    </div>
+      </div>
+    </AuthGate>
   );
 }

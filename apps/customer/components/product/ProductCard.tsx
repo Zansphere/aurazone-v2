@@ -145,6 +145,9 @@ export function ProductCard({ product, viewMode = "grid" }: ProductCardProps) {
                 <span className="text-lg font-bold text-[var(--color-text-primary)]">
                   {"\u20B9"}{price.toLocaleString()}
                 </span>
+                <span className="text-[10px] text-[var(--color-text-tertiary)] font-normal">
+                  (Incl. 18% GST)
+                </span>
                 {comparePrice && (
                   <span className="text-xs text-[var(--color-text-tertiary)] line-through">
                     {"\u20B9"}{comparePrice.toLocaleString()}
@@ -268,9 +271,12 @@ export function ProductCard({ product, viewMode = "grid" }: ProductCardProps) {
             </h3>
           </Link>
 
-          <div className="flex items-center gap-2 pt-0.5">
+          <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
             <span className="text-sm font-bold text-[var(--color-text-primary)]">
               {"\u20B9"}{price.toLocaleString()}
+            </span>
+            <span className="text-[10px] text-[var(--color-text-tertiary)] font-normal">
+              (Incl. 18% GST)
             </span>
             {comparePrice && (
               <span className="text-xs text-[var(--color-text-tertiary)] line-through">

@@ -466,7 +466,9 @@ export default function ProductDetailPage() {
                       )}
                     </>
                   )}
-                  <span className="text-xs text-[var(--color-text-tertiary)]">(Inclusive of all taxes)</span>
+                  <span className="text-xs text-[var(--color-text-tertiary)]">
+                    (Inclusive of 18% GST · Base: ₹{Math.round(price / 1.18).toLocaleString()})
+                  </span>
                 </div>
                 {isCouponApplicableToThisProduct && couponDiscountOnThisProduct > 0 && (
                   <p className="text-xs text-emerald-700 font-semibold flex items-center gap-1.5">

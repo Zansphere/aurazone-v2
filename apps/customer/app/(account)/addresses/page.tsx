@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { MapPin, Plus, Trash2, Star } from "lucide-react";
+import { AuthGate } from "@/components/providers/AuthGate";
 
 export default function AddressesPage() {
   const queryClient = useQueryClient();
@@ -30,7 +31,8 @@ export default function AddressesPage() {
   const addresses = data?.data ?? [];
 
   return (
-    <div className="space-y-4">
+    <AuthGate pageLabel="your saved addresses" icon={<MapPin size={28} className="text-[var(--color-text-tertiary)]" />}>
+      <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Saved Addresses</h2>
         <button onClick={() => setShowForm(!showForm)}
@@ -106,6 +108,7 @@ export default function AddressesPage() {
           </div>
         ))
       )}
-    </div>
+      </div>
+    </AuthGate>
   );
 }

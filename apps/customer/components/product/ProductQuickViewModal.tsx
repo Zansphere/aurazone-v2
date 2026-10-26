@@ -166,9 +166,12 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
                 {product.name}
               </h2>
 
-              <div className="flex items-baseline gap-2.5">
+              <div className="flex items-baseline gap-2.5 flex-wrap">
                 <span className="text-xl font-bold text-[var(--color-text-primary)]">
                   {"\u20B9"}{price.toLocaleString()}
+                </span>
+                <span className="text-xs text-[var(--color-text-tertiary)] font-normal">
+                  (Inclusive of 18% GST)
                 </span>
                 {comparePrice && (
                   <>

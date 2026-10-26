@@ -108,7 +108,8 @@ export default function CartPage() {
   const discountedSubtotal = Math.max(0, subtotal - discountAmount);
   const deliveryFee = discountedSubtotal >= 499 ? 0 : 49;
   const total = discountedSubtotal + deliveryFee;
-  const estimatedGst = Math.round(total - total / 1.18);
+  // Standard 18% GST included in the products price: Base = Subtotal / 1.18, GST = Subtotal * 18 / 118
+  const estimatedGst = Math.round((discountedSubtotal * 18) / 118);
 
   if (isLoading) {
     return (
@@ -356,7 +357,7 @@ export default function CartPage() {
                 <span className="font-medium text-emerald-600">{deliveryFee === 0 ? "FREE" : "₹49"}</span>
               </div>
               <div className="flex justify-between text-xs text-[var(--color-text-tertiary)] pt-0.5">
-                <span>Includes GST (18%)</span>
+                <span>Included 18% GST (CGST 9% + SGST 9%)</span>
                 <span>₹{estimatedGst.toLocaleString()}</span>
               </div>
             </div>

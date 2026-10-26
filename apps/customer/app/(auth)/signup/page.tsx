@@ -20,7 +20,7 @@ export default function SignupPage() {
     setLoading(true);
     try {
       await signup(email, password, fullName || undefined);
-      router.push("/");
+      router.push(`/verify?sent=true&email=${encodeURIComponent(email.trim())}`);
     } catch (err: unknown) {
       setError((err as Error).message);
     } finally { setLoading(false); }

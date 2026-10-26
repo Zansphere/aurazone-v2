@@ -188,7 +188,7 @@ export async function getCurrentUser(userId: string) {
     where: { id: userId },
     select: {
       id: true, email: true, phone: true, fullName: true,
-      avatar: true, role: true, createdAt: true,
+      avatar: true, role: true, isEmailVerified: true, createdAt: true,
     },
   });
   if (!user) throw Object.assign(new Error("User not found"), { statusCode: 404 });

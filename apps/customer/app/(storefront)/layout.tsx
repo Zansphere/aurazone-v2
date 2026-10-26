@@ -10,7 +10,7 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
       <div className="sticky top-0 z-40 w-full">
 
         <Navbar />
-        <AnnouncementBar />
+        {/* <AnnouncementBar /> */}
       </div>
       <main className="min-h-[calc(100vh-var(--header-height))] pb-20 md:pb-0">
         {children}

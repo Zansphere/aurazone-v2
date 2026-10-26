@@ -41,8 +41,8 @@ export function CartDrawer() {
           <h2 className="text-lg font-bold font-[var(--font-heading)] flex items-center gap-2 text-[var(--color-text-primary)]">
             <ShoppingBag size={20} />
             Your Cart
-            <span className="ml-2 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-bg-muted)] text-[11px] text-[var(--color-text-secondary)]">
-              {cart?.itemCount ?? 0}
+            <span className="ml-2 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-bg-muted)] text-[11px] text-[var(--color-text-secondary)] font-bold">
+              {new Set(cart?.items?.map((item) => item.productId || (item as any).variant?.product?.id || item.variantId)).size}
             </span>
           </h2>
           <button

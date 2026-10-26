@@ -343,17 +343,28 @@ const orderRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.get("/", { preHandler: [authenticate] }, async (request, reply) => {
+  fastify.get("/", { preHandler: [optionalAuth] }, async (request, reply) => {
     const query = request.query as Record<string, string>;
     const { skip, take } = parsePagination(query.skip, query.take);
-    const { orders, total } = await orderService.getUserOrders(request.user!.userId, skip, take);
+    const userId = request.user?.userId;
+    const sessionId = request.headers["x-guest-session"] as string | undefined;
+
+    if (!userId && !sessionId) {
+      return sendPaginated(reply, [], 0, 1, take);
+    }
+
+    const { orders, total } = await orderService.getUserOrders({ userId, sessionId, skip, take });
     return sendPaginated(reply, orders, total, Math.floor(skip / take) + 1, take);
   });
 
-  fastify.get("/:id", { preHandler: [authenticate] }, async (request, reply) => {
+  fastify.get("/:id", { preHandler: [optionalAuth] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const userId = request.user?.userId;
+    const sessionId = request.headers["x-guest-session"] as string | undefined;
+    const trackingToken = (request.query as { token?: string })?.token;
+
     try {
-      const order = await orderService.getOrderById(id, request.user!.userId);
+      const order = await orderService.getOrderById(id, { userId, sessionId, trackingToken });
       return sendSuccess(reply, order);
     } catch (err: unknown) {
       return handleRouteError(reply, err);
@@ -402,11 +413,14 @@ const orderRoutes: FastifyPluginAsync = async (fastify) => {
     try {
       const order = await prisma.order.findFirst({
         where: { orderNumber: query.orderNumber },
-        include: { user: true }
+        include: { user: true, orderAddress: true },
       });
       if (!order) return sendError(reply, "Order not found", 404);
-      
-      const orderEmail = order.user?.email || order.notes?.match(/Guest Email: ([^\s]+)/)?.[1];
+
+      const orderEmail =
+        order.user?.email ||
+        order.orderAddress?.email ||
+        order.notes?.match(/Guest Email: ([^\s]+)/)?.[1];
       if (!orderEmail || orderEmail.toLowerCase() !== query.email.toLowerCase()) {
         return sendError(reply, "Invalid email for this order", 403);
       }

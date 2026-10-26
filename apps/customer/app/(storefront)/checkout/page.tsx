@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { MapPin, Plus, CreditCard, Lock, ChevronRight, Tag, Truck, Check, X, Sparkles } from "lucide-react";
+import { MapPin, Plus, CreditCard, Lock, ChevronRight, Tag, Truck, Check, X, Sparkles, Mail } from "lucide-react";
 import Link from "next/link";
 import Script from "next/script";
 
@@ -15,7 +15,7 @@ import { useCouponStore } from "@/stores/coupon.store";
 export default function CheckoutPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isAuthenticated, isLoading: isAuthLoading } = useAuthStore();
+  const { user, isAuthenticated, isLoading: isAuthLoading } = useAuthStore();
 
   const [selectedAddressId, setSelectedAddressId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("COD");
@@ -172,7 +172,8 @@ export default function CheckoutPage() {
   const discountedSubtotal = Math.max(0, subtotal - discount);
   const deliveryFee = deliveryOption === "express" ? 99 : (discountedSubtotal >= 499 ? 0 : 49);
   const total = discountedSubtotal + deliveryFee;
-  const estimatedTax = Math.round(total - (total / 1.18)); // 18% inclusive GST
+  // Standard 18% GST included in product prices: Base = Subtotal / 1.18, GST = Subtotal * 18 / 118
+  const estimatedTax = Math.round((discountedSubtotal * 18) / 118); // 18% inclusive GST
 
   const isGuest = !isAuthenticated;
   const showAddressForm = isGuest || isAddingNew || addresses.length === 0;
@@ -255,6 +256,29 @@ export default function CheckoutPage() {
             >
               <X size={16} />
             </button>
+          </div>
+        )}
+
+        {/* Email Verification Required Guidance Alert */}
+        {isAuthenticated && user && !user.isEmailVerified && (
+          <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 dark:bg-amber-950/40 p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start gap-3">
+              <Mail className="text-amber-600 shrink-0 mt-0.5" size={18} />
+              <div>
+                <p className="font-bold text-amber-900 dark:text-amber-200">
+                  Verify your email to activate full account protection
+                </p>
+                <p className="text-amber-800 dark:text-amber-300 mt-0.5">
+                  A verification link was sent to <strong>{user.email}</strong>. Please check your inbox and verify your email to ensure seamless order confirmations and account security.
+                </p>
+              </div>
+            </div>
+            <Link
+              href={`/verify?sent=true&email=${encodeURIComponent(user.email)}`}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-amber-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 transition-colors shadow-sm"
+            >
+              Verify Email Instructions
+            </Link>
           </div>
         )}
 
@@ -498,7 +522,7 @@ export default function CheckoutPage() {
                   <span className="font-medium text-emerald-600">{deliveryFee === 0 ? "Free" : `₹${deliveryFee}`}</span>
                 </div>
                 <div className="flex justify-between text-xs text-[var(--color-text-tertiary)] pt-1">
-                  <span>Included GST (18%)</span>
+                  <span>Included 18% GST (CGST 9% + SGST 9%)</span>
                   <span>₹{estimatedTax.toLocaleString()}</span>
                 </div>
                 <div className="pt-3 mt-3 border-t border-[var(--color-border)] flex justify-between text-base font-bold">

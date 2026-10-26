@@ -3,6 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuthStore } from "@/stores/auth.store";
 import { api } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   User,
   Mail,
@@ -13,11 +16,469 @@ import {
   Trash2,
   AlertTriangle,
   Check,
-  X,
+  Search,
+  Package,
+  Truck,
+  Heart,
+  ShoppingCart,
+  ArrowRight,
+  Clock,
+  Sparkles,
+  LogIn,
+  UserPlus,
+  ChevronRight,
+  Hash,
 } from "lucide-react";
+import { getOrderStatusMeta } from "@/lib/order-status";
 
 export default function ProfilePage() {
-  const { user, fetchUser, logout } = useAuthStore();
+  const { user, isAuthenticated, isLoading } = useAuthStore();
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="h-32 shimmer rounded-2xl" />
+        <div className="h-64 shimmer rounded-2xl" />
+        <div className="h-48 shimmer rounded-2xl" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <GuestProfileHub />;
+  }
+
+  return <AuthenticatedProfileView user={user} />;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   GUEST PROFILE HUB (Placeholder profile page for non-logged-in customers)
+   ───────────────────────────────────────────────────────────────────────────── */
+function GuestProfileHub() {
+  const router = useRouter();
+
+  // Order lookup form state
+  const [lookupOrderNumber, setLookupOrderNumber] = useState("");
+  const [lookupEmail, setLookupEmail] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [lookupError, setLookupError] = useState("");
+
+  // Fetch orders placed in current guest session
+  const { data, isLoading: loadingOrders } = useQuery({
+    queryKey: ["guest-profile-orders"],
+    queryFn: () => api.get<any[]>("/orders"),
+  });
+
+  const sessionOrders = Array.isArray(data?.data) ? data.data : [];
+
+  const handleLookupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLookupError("");
+    setIsSearching(true);
+
+    try {
+      const res = await api.get<{ trackingToken: string }>(
+        `/orders/track/lookup?orderNumber=${encodeURIComponent(
+          lookupOrderNumber.trim()
+        )}&email=${encodeURIComponent(lookupEmail.trim())}`
+      );
+
+      if (res.data?.trackingToken) {
+        router.push(`/track-order/${res.data.trackingToken}`);
+      } else {
+        setLookupError("No order found matching this Order Number and Email.");
+      }
+    } catch (err: any) {
+      setLookupError(
+        err.message ||
+          "Order not found. Please verify your order number and email address."
+      );
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* 1. Hero Notice Card */}
+      <div className="relative overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-6 sm:p-8 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+          <div className="flex items-start gap-4">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500/20 to-[var(--color-accent)]/20 text-[var(--color-accent)] border border-[var(--color-accent)]/20 shadow-sm">
+              <User size={30} />
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 px-2.5 py-0.5 text-xs font-semibold">
+                  Guest Session
+                </span>
+                <span className="text-xs text-[var(--color-text-tertiary)]">
+                  Unauthenticated Mode
+                </span>
+              </div>
+              <h2 className="text-xl font-bold text-[var(--color-text-primary)] font-[var(--font-heading)]">
+                Guest Customer Profile
+              </h2>
+              <p className="text-xs sm:text-sm text-[var(--color-text-secondary)] max-w-xl leading-relaxed">
+                Full profile settings (personal details, address book, password management) are
+                reserved for registered members. As a guest, you can track packages, review orders
+                placed on this device, and lookup previous purchases.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap sm:flex-col gap-2.5 w-full sm:w-auto shrink-0">
+            <Link
+              href="/login"
+              className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--color-primary)] px-5 py-2.5 text-xs font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-all shadow-sm"
+            >
+              <LogIn size={14} /> Sign In
+            </Link>
+            <Link
+              href="/signup"
+              className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-base)] px-5 py-2.5 text-xs font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-bg-muted)] transition-colors"
+            >
+              <UserPlus size={14} /> Create Account
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Order Lookup Tool */}
+      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--color-accent-light)] text-[var(--color-accent)]">
+              <Search size={18} />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-[var(--color-text-primary)]">
+                Find & Track Any Order
+              </h3>
+              <p className="text-xs text-[var(--color-text-secondary)]">
+                Lookup your order details and live shipping updates using your Order # and Email.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            href="/track-order"
+            className="hidden sm:inline-flex items-center gap-1 text-xs font-semibold text-[var(--color-accent)] hover:underline"
+          >
+            Have a tracking token? Track here <ArrowRight size={12} />
+          </Link>
+        </div>
+
+        <form onSubmit={handleLookupSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)] mb-1">
+              Order Number
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                required
+                placeholder="e.g. ORD-20261026-ABCD"
+                value={lookupOrderNumber}
+                onChange={(e) => setLookupOrderNumber(e.target.value)}
+                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-base)] pl-9 pr-3 py-2.5 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)] font-mono transition-colors"
+              />
+              <Hash size={14} className="absolute left-3 top-3 text-[var(--color-text-tertiary)]" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)] mb-1">
+              Email Address
+            </label>
+            <div className="relative">
+              <input
+                type="email"
+                required
+                placeholder="Email used during checkout"
+                value={lookupEmail}
+                onChange={(e) => setLookupEmail(e.target.value)}
+                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-base)] pl-9 pr-3 py-2.5 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)] transition-colors"
+              />
+              <Mail size={14} className="absolute left-3 top-3 text-[var(--color-text-tertiary)]" />
+            </div>
+          </div>
+
+          {lookupError && (
+            <div className="sm:col-span-2 rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 p-3 text-xs text-red-600 dark:text-red-400">
+              {lookupError}
+            </div>
+          )}
+
+          <div className="sm:col-span-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={isSearching}
+              className="rounded-xl bg-[var(--color-primary)] px-6 py-2.5 text-xs font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-all flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
+            >
+              <Search size={14} />
+              {isSearching ? "Searching Order..." : "Find Order & Track"}
+            </button>
+
+            <Link
+              href="/track-order"
+              className="sm:hidden text-xs font-semibold text-[var(--color-accent)] hover:underline inline-flex items-center gap-1"
+            >
+              Have a tracking token? Track here <ArrowRight size={12} />
+            </Link>
+          </div>
+        </form>
+      </div>
+
+      {/* 3. Orders Placed in this Guest Session */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-[var(--color-text-primary)]">
+              Orders Placed on this Device
+            </h3>
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              Track and view order details for purchases made during your current session.
+            </p>
+          </div>
+          {sessionOrders.length > 0 && (
+            <Link
+              href="/orders"
+              className="text-xs font-semibold text-[var(--color-accent)] hover:underline inline-flex items-center gap-1"
+            >
+              View All ({sessionOrders.length}) <ChevronRight size={14} />
+            </Link>
+          )}
+        </div>
+
+        {loadingOrders ? (
+          <div className="space-y-3">
+            <div className="h-24 shimmer rounded-2xl" />
+            <div className="h-24 shimmer rounded-2xl" />
+          </div>
+        ) : sessionOrders.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-bg-surface)] p-6 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-bg-muted)] text-[var(--color-text-tertiary)] mx-auto mb-2.5">
+              <Package size={22} />
+            </div>
+            <p className="text-sm font-bold text-[var(--color-text-primary)]">
+              No recent orders in this browser session
+            </p>
+            <p className="mt-1 text-xs text-[var(--color-text-secondary)] max-w-sm mx-auto">
+              If you placed an order earlier as a guest, you can track it anytime using the Order
+              Finder above.
+            </p>
+            <Link
+              href="/products"
+              className="mt-3.5 inline-flex items-center gap-1.5 rounded-xl bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-colors shadow-sm"
+            >
+              Start Shopping <ArrowRight size={12} />
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {sessionOrders.slice(0, 3).map((order: any) => {
+              const statusMeta = getOrderStatusMeta(order.status);
+              return (
+              <div
+                key={order.id}
+                className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-5 shadow-sm hover:border-[var(--color-accent)] transition-all"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--color-border)]">
+                  <div>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-sm font-mono font-bold text-[var(--color-text-primary)]">
+                        {order.orderNumber}
+                      </span>
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold ${statusMeta.badgeClass}`}
+                      >
+                        {statusMeta.badgeLabel}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[var(--color-text-tertiary)] mt-1 flex items-center gap-1.5">
+                      <Clock size={12} />
+                      {new Date(order.createdAt).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                      {" · "}
+                      {order.items?.reduce((s: number, i: any) => s + i.quantity, 0) ?? 0} item
+                      {(order.items?.reduce((s: number, i: any) => s + i.quantity, 0) ?? 0) !== 1
+                        ? "s"
+                        : ""}
+                    </p>
+                  </div>
+
+                  <div className="text-left sm:text-right">
+                    <span className="text-base font-black text-[var(--color-text-primary)]">
+                      ₹{Number(order.totalAmount).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-3 gap-2">
+                  <Link
+                    href={`/orders/${order.id}`}
+                    className="text-xs font-semibold text-[var(--color-text-primary)] hover:text-[var(--color-accent)] transition-colors inline-flex items-center gap-1"
+                  >
+                    View Order Details <ChevronRight size={14} />
+                  </Link>
+
+                  {order.trackingToken && (
+                    <Link
+                      href={`/track-order/${order.trackingToken}`}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-border)] transition-colors"
+                    >
+                      <Truck size={13} className="text-emerald-600" /> Track Live
+                    </Link>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          </div>
+        )}
+      </div>
+
+      {/* 4. Important Customer Services & Quick Links */}
+      <div>
+        <h3 className="text-sm font-bold text-[var(--color-text-primary)] mb-3">
+          Accessible Customer Services
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <Link
+            href="/orders"
+            className="group flex items-start gap-3.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-4 shadow-sm hover:border-[var(--color-accent)] transition-all"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 group-hover:scale-105 transition-transform">
+              <ShoppingCart size={18} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1 font-semibold text-xs text-[var(--color-text-primary)] group-hover:text-[var(--color-accent)] transition-colors">
+                Order History & Finder <ChevronRight size={13} />
+              </div>
+              <p className="text-[11px] text-[var(--color-text-secondary)] mt-0.5">
+                Review recent purchases or search any order placed with your email address.
+              </p>
+            </div>
+          </Link>
+
+          <Link
+            href="/track-order"
+            className="group flex items-start gap-3.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-4 shadow-sm hover:border-[var(--color-accent)] transition-all"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 group-hover:scale-105 transition-transform">
+              <Truck size={18} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1 font-semibold text-xs text-[var(--color-text-primary)] group-hover:text-[var(--color-accent)] transition-colors">
+                Live Shipment Tracking <ChevronRight size={13} />
+              </div>
+              <p className="text-[11px] text-[var(--color-text-secondary)] mt-0.5">
+                Track carrier journey, courier partner milestones, and delivery estimates in real time.
+              </p>
+            </div>
+          </Link>
+
+          <Link
+            href="/cart"
+            className="group flex items-start gap-3.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-4 shadow-sm hover:border-[var(--color-accent)] transition-all"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 group-hover:scale-105 transition-transform">
+              <Package size={18} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1 font-semibold text-xs text-[var(--color-text-primary)] group-hover:text-[var(--color-accent)] transition-colors">
+                Active Shopping Cart <ChevronRight size={13} />
+              </div>
+              <p className="text-[11px] text-[var(--color-text-secondary)] mt-0.5">
+                Review items ready in your bag, apply coupons, and proceed to guest checkout.
+              </p>
+            </div>
+          </Link>
+
+          <Link
+            href="/wishlist"
+            className="group flex items-start gap-3.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-4 shadow-sm hover:border-[var(--color-accent)] transition-all"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 group-hover:scale-105 transition-transform">
+              <Heart size={18} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1 font-semibold text-xs text-[var(--color-text-primary)] group-hover:text-[var(--color-accent)] transition-colors">
+                Saved Wishlist <ChevronRight size={13} />
+              </div>
+              <p className="text-[11px] text-[var(--color-text-secondary)] mt-0.5">
+                Save your favorite items for later. Sign in anytime to sync across all devices.
+              </p>
+            </div>
+          </Link>
+        </div>
+      </div>
+
+      {/* 5. Why Create an Account Member Benefits */}
+      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-muted)]/50 p-6 shadow-sm space-y-4">
+        <div className="flex items-center gap-2">
+          <Sparkles size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-bold text-[var(--color-text-primary)]">
+            Why register for an AuraZone account?
+          </h3>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-[var(--color-text-secondary)]">
+          <div className="flex items-start gap-2">
+            <Check size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+            <span>
+              <strong>1-Click Checkout:</strong> Save multiple shipping addresses and phone contacts.
+            </span>
+          </div>
+          <div className="flex items-start gap-2">
+            <Check size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+            <span>
+              <strong>Multi-Device Sync:</strong> Access your orders, cart, and wishlist anywhere.
+            </span>
+          </div>
+          <div className="flex items-start gap-2">
+            <Check size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+            <span>
+              <strong>Exclusive Deals:</strong> Unlock member-only coupons and seasonal discounts.
+            </span>
+          </div>
+          <div className="flex items-start gap-2">
+            <Check size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+            <span>
+              <strong>Hassle-Free Support:</strong> Faster return processing and direct seller messaging.
+            </span>
+          </div>
+        </div>
+
+        <div className="pt-2 flex items-center gap-3">
+          <Link
+            href="/signup"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-colors shadow-sm"
+          >
+            Create Free Account <ArrowRight size={12} />
+          </Link>
+          <Link
+            href="/login"
+            className="text-xs font-semibold text-[var(--color-text-primary)] hover:underline"
+          >
+            Already have an account? Sign in
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   AUTHENTICATED PROFILE VIEW (Full profile editor for logged-in customers)
+   ───────────────────────────────────────────────────────────────────────────── */
+function AuthenticatedProfileView({ user }: { user: any }) {
+  const { fetchUser, logout } = useAuthStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Profile info state

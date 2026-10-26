@@ -4,7 +4,12 @@ import { api } from "@/lib/api";
 import { useCartStore } from "./cart.store";
 
 interface User {
-  id: string; email: string; fullName: string | null; avatar: string | null; role: string;
+  id: string;
+  email: string;
+  fullName: string | null;
+  avatar: string | null;
+  role: string;
+  isEmailVerified?: string | Date | null;
 }
 
 interface AuthState {
@@ -15,6 +20,7 @@ interface AuthState {
   signup: (email: string, password: string, fullName?: string) => Promise<void>;
   logout: () => Promise<void>;
   fetchUser: () => Promise<void>;
+  resendVerification: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -55,5 +61,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch { 
       set({ user: null, isAuthenticated: false, isLoading: false }); 
     }
+  },
+
+  resendVerification: async () => {
+    await api.post("/auth/resend-verification");
   },
 }));

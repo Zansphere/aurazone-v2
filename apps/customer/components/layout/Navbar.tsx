@@ -50,7 +50,10 @@ export function Navbar() {
     fetchCart();
   }, [fetchCart]);
 
-  const cartCount = cart?.itemCount ?? 0;
+  // Cart icon badge displays the count of unique products in the cart
+  const cartCount = new Set(
+    cart?.items?.map((item) => item.productId || (item as any).variant?.product?.id || item.variantId)
+  ).size;
 
   // Close user menu on outside click
   useEffect(() => {
@@ -81,6 +84,17 @@ export function Navbar() {
 
   return (
     <>
+      {isAuthenticated && user && !user.isEmailVerified && (
+        <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white text-[11px] font-medium py-1.5 px-4 text-center flex items-center justify-center gap-2 shadow-sm">
+          <span>Please check your email inbox and click the verification link to activate your account.</span>
+          <Link
+            href={`/verify?sent=true&email=${encodeURIComponent(user.email)}`}
+            className="underline font-bold text-amber-100 hover:text-white transition-colors ml-1"
+          >
+            View Instructions →
+          </Link>
+        </div>
+      )}
       <header
         style={{ height: "var(--header-height)" }}
         className="relative w-full z-40 flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-bg-surface)]/95 backdrop-blur-md px-4 md:px-8"
@@ -180,8 +194,10 @@ export function Navbar() {
             </div>
           ) : (
             <Link
-              href="/login"
+              href="/profile"
               className="hidden md:flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors"
+              title="My Account"
+              aria-label="My Account"
             >
               <User size={18} />
             </Link>
@@ -236,7 +252,7 @@ export function Navbar() {
                 </div>
               </div>
             ) : (
-              <div className="border-b border-[var(--color-border)] px-5 py-4">
+              <div className="border-b border-[var(--color-border)] px-5 py-4 space-y-2">
                 <Link
                   href="/login"
                   onClick={() => setMobileOpen(false)}
@@ -244,6 +260,22 @@ export function Navbar() {
                 >
                   Sign in
                 </Link>
+                <div className="flex gap-2">
+                  <Link
+                    href="/profile"
+                    onClick={() => setMobileOpen(false)}
+                    className="flex-1 text-center py-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] bg-[var(--color-bg-muted)] rounded-lg transition-colors"
+                  >
+                    Guest Profile
+                  </Link>
+                  <Link
+                    href="/track-order"
+                    onClick={() => setMobileOpen(false)}
+                    className="flex-1 text-center py-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] bg-[var(--color-bg-muted)] rounded-lg transition-colors"
+                  >
+                    Track Order
+                  </Link>
+                </div>
               </div>
             )}
 

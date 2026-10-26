@@ -382,10 +382,28 @@ export async function createOrderFromCart(
   return order;
 }
 
-export async function getUserOrders(userId: string, skip = 0, take = 10) {
+export async function getUserOrders(
+  auth: { userId?: string; sessionId?: string; skip?: number; take?: number } | string,
+  skipArg = 0,
+  takeArg = 10
+) {
+  const userId = typeof auth === "string" ? auth : auth?.userId;
+  const sessionId = typeof auth === "object" ? auth?.sessionId : undefined;
+  const skip = typeof auth === "object" ? (auth.skip ?? 0) : skipArg;
+  const take = typeof auth === "object" ? (auth.take ?? 10) : takeArg;
+
+  const where: Prisma.OrderWhereInput = { deletedAt: null };
+  if (userId) {
+    where.userId = userId;
+  } else if (sessionId) {
+    where.sessionId = sessionId;
+  } else {
+    return { orders: [], total: 0 };
+  }
+
   const [orders, total] = await Promise.all([
     prisma.order.findMany({
-      where: { userId, deletedAt: null },
+      where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip,
       take,
@@ -396,12 +414,19 @@ export async function getUserOrders(userId: string, skip = 0, take = 10) {
         shipments: { take: 1, orderBy: { createdAt: "desc" } },
       },
     }),
-    prisma.order.count({ where: { userId, deletedAt: null } }),
+    prisma.order.count({ where }),
   ]);
   return { orders, total };
 }
 
-export async function getOrderById(id: string, userId?: string) {
+export async function getOrderById(
+  id: string,
+  auth?: { userId?: string; sessionId?: string; trackingToken?: string } | string
+) {
+  const userId = typeof auth === "string" ? auth : auth?.userId;
+  const sessionId = typeof auth === "object" ? auth.sessionId : undefined;
+  const trackingToken = typeof auth === "object" ? auth.trackingToken : undefined;
+
   const order = await prisma.order.findUnique({
     where: { id },
     include: {
@@ -425,7 +450,19 @@ export async function getOrderById(id: string, userId?: string) {
   });
 
   if (!order || order.deletedAt) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
-  if (userId && order.userId !== userId) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
+
+  // Authorization check (if auth is passed)
+  if (auth) {
+    const isOwner =
+      (Boolean(userId) && order.userId === userId) ||
+      (Boolean(sessionId) && order.sessionId === sessionId) ||
+      (Boolean(trackingToken) && order.trackingToken === trackingToken);
+
+    if (!isOwner) {
+      throw Object.assign(new Error("Order not found"), { statusCode: 404 });
+    }
+  }
+
   return order;
 }
 

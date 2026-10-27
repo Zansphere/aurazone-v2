@@ -414,11 +414,17 @@ export default function ProductDetailPage() {
 
           {/* Price Section with Coupon Live Adjustment */}
           {(() => {
-            const isCouponApplicableToThisProduct = Boolean(
+            const minOrderValue = Number(appliedCoupon?.minOrderValue || 0);
+            const currentItemTotal = price * quantity;
+            const isEligibleProduct = Boolean(
               appliedCoupon &&
               (!appliedCoupon.isProductSpecific ||
                 appliedCoupon.applicableProductIds?.includes(product?.id))
             );
+
+            // Minimum order value MUST be satisfied by this product selection
+            const meetsMinOrder = !minOrderValue || currentItemTotal >= minOrderValue;
+            const isCouponApplicableToThisProduct = isEligibleProduct && meetsMinOrder;
 
             let adjustedPrice = price;
             let couponDiscountOnThisProduct = 0;
@@ -435,7 +441,7 @@ export default function ProductDetailPage() {
             }
 
             return (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <div className="flex items-baseline gap-3 flex-wrap">
                   {isCouponApplicableToThisProduct && couponDiscountOnThisProduct > 0 ? (
                     <>
@@ -470,11 +476,26 @@ export default function ProductDetailPage() {
                     (Inclusive of 18% GST · Base: ₹{Math.round(price / 1.18).toLocaleString()})
                   </span>
                 </div>
+
                 {isCouponApplicableToThisProduct && couponDiscountOnThisProduct > 0 && (
                   <p className="text-xs text-emerald-700 font-semibold flex items-center gap-1.5">
                     <Sparkles size={14} className="text-emerald-600" />
                     Special promo code applied! Discount is held for you through checkout.
                   </p>
+                )}
+
+                {isEligibleProduct && !meetsMinOrder && appliedCoupon && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-900 flex items-start gap-2.5">
+                    <Tag size={15} className="text-amber-600 shrink-0 mt-0.5" />
+                    <div className="leading-relaxed">
+                      <span className="font-semibold text-amber-950">
+                        Coupon {appliedCoupon.code} requires a minimum order value of ₹{minOrderValue.toLocaleString()}.
+                      </span>
+                      <p className="text-amber-800 text-[11px] mt-0.5">
+                        Current selection: ₹{currentItemTotal.toLocaleString()}. Add ₹{(minOrderValue - currentItemTotal).toLocaleString()} more to your order or increase quantity to qualify for savings.
+                      </p>
+                    </div>
+                  </div>
                 )}
               </div>
             );
@@ -500,23 +521,35 @@ export default function ProductDetailPage() {
 
               <div className="space-y-2">
                 {product.applicableCoupons.map((c: any) => {
+                  const minOrder = Number(c.minOrderValue || 0);
+                  const currentItemTotal = price * quantity;
+                  const meetsMinOrder = !minOrder || currentItemTotal >= minOrder;
                   const isThisApplied = appliedCoupon?.code === c.code;
+
                   return (
                     <div
                       key={c.id || c.code}
-                      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border bg-white transition-all ${isThisApplied
-                        ? "border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm"
-                        : "border-indigo-100 hover:border-indigo-300"
-                        }`}
+                      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border bg-white transition-all ${
+                        isThisApplied && meetsMinOrder
+                          ? "border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm"
+                          : isThisApplied && !meetsMinOrder
+                          ? "border-amber-300 ring-2 ring-amber-300/20 shadow-sm"
+                          : "border-indigo-100 hover:border-indigo-300"
+                      }`}
                     >
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-900 border border-indigo-200">
                             {c.code}
                           </span>
                           <span className="text-xs font-bold text-emerald-700">
                             {c.discountType === "PERCENTAGE" ? `${c.discountValue}% OFF` : `₹${c.discountValue} FLAT OFF`}
                           </span>
+                          {minOrder > 0 && (
+                            <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                              Min. Order ₹{minOrder.toLocaleString()}
+                            </span>
+                          )}
                           {c.isProductSpecific && (
                             <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded border border-purple-200">
                               Product Exclusive
@@ -526,6 +559,16 @@ export default function ProductDetailPage() {
                         <p className="text-xs text-[var(--color-text-secondary)]">
                           {c.description || (c.isProductSpecific ? "Special promotional savings assigned to this product." : "Store-wide discount on qualifying orders.")}
                         </p>
+                        {minOrder > 0 && (
+                          <p className="text-[11px] text-amber-700 font-medium">
+                            Requires minimum order value of ₹{minOrder.toLocaleString()} on eligible items.
+                            {!meetsMinOrder && (
+                              <span className="text-amber-600 block">
+                                (Current selection: ₹{currentItemTotal.toLocaleString()} · Add ₹{(minOrder - currentItemTotal).toLocaleString()} more to qualify)
+                              </span>
+                            )}
+                          </p>
+                        )}
                         {c.endDate && (
                           <p className="text-[10px] text-[var(--color-text-tertiary)] flex items-center gap-1">
                             <Calendar size={11} /> Valid until {new Date(c.endDate).toLocaleDateString()}
@@ -536,9 +579,15 @@ export default function ProductDetailPage() {
                       <div className="shrink-0 flex items-center gap-2">
                         {isThisApplied ? (
                           <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
-                              <Check size={13} strokeWidth={3} /> Applied
-                            </span>
+                            {meetsMinOrder ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                <Check size={13} strokeWidth={3} /> Applied
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                                Min. ₹{minOrder.toLocaleString()} Required
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={() => removeCoupon()}
@@ -550,12 +599,13 @@ export default function ProductDetailPage() {
                         ) : (
                           <button
                             type="button"
-                            disabled={applyingCode === c.code}
+                            disabled={!meetsMinOrder || applyingCode === c.code}
                             onClick={async () => {
+                              if (!meetsMinOrder) return;
                               setCouponApplyError("");
                               setApplyingCode(c.code);
                               try {
-                                await applyCoupon(c.code, price, [
+                                await applyCoupon(c.code, currentItemTotal, [
                                   {
                                     productId: product.id,
                                     variantId: variant?.id,
@@ -569,9 +619,18 @@ export default function ProductDetailPage() {
                                 setApplyingCode(null);
                               }
                             }}
-                            className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition-all shadow-sm active:scale-95 disabled:opacity-50"
+                            title={!meetsMinOrder ? `Requires minimum purchase of ₹${minOrder.toLocaleString()}` : "Apply coupon"}
+                            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm ${
+                              !meetsMinOrder
+                                ? "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
+                                : "bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] active:scale-95"
+                            } disabled:opacity-60`}
                           >
-                            {applyingCode === c.code ? "Applying..." : "Apply Coupon"}
+                            {!meetsMinOrder
+                              ? `Min. ₹${minOrder.toLocaleString()}`
+                              : applyingCode === c.code
+                              ? "Applying..."
+                              : "Apply Coupon"}
                           </button>
                         )}
                       </div>

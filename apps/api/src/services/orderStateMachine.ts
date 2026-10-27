@@ -175,7 +175,7 @@ export async function transitionOrderStatus(options: TransitionOrderOptions) {
   // Run in provided transaction or create new atomic transaction
   const result = options.tx
     ? await executeTransition(options.tx)
-    : await prisma.$transaction(executeTransition);
+    : await prisma.$transaction(executeTransition, { maxWait: 10000, timeout: 30000 });
 
   // 8. External side effects OUTSIDE the database transaction (as per Principle 1)
   if (result.transitioned) {

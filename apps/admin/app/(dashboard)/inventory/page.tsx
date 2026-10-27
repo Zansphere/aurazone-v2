@@ -45,21 +45,9 @@ export default function InventoryPage() {
 
   const handleExportInventory = async () => {
     try {
-      const token = localStorage.getItem("accessToken") || "";
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api/v1"}/admin/export/inventory`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "aurazone_inventory_export.csv";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch {
-      alert("Failed to export inventory CSV");
+      await api.download("/admin/export/inventory", "aurazone_inventory_export.csv");
+    } catch (err: any) {
+      alert(err.message || "Failed to export inventory CSV");
     }
   };
 

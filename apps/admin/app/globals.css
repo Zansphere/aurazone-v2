@@ -79,6 +79,70 @@
   --header-height: 56px;
 }
 
+html.dark, .dark {
+  /* ── Backgrounds ────────────────────────────────────────────────── */
+  --color-bg-base: #0B0F19;
+  --color-bg-surface: #111827;
+  --color-bg-muted: #1F2937;
+  --color-bg-elevated: #1F2937;
+
+  /* ── Core Colors ────────────────────────────────────────────────── */
+  --color-primary: #F3F4F6;
+  --color-primary-hover: #FFFFFF;
+  --color-accent: #8DA37B;
+  --color-accent-light: #1A2416;
+  --color-accent-hover: #A1B88F;
+  --color-accent-warm: #D4A373;
+  --color-accent-warm-light: #2C2117;
+
+  /* ── Semantic ───────────────────────────────────────────────────── */
+  --color-success: #10B981;
+  --color-success-bg: #064E3B;
+  --color-success-text: #6EE7B7;
+  --color-warning: #F59E0B;
+  --color-warning-bg: #78350F;
+  --color-warning-text: #FDE68A;
+  --color-danger: #EF4444;
+  --color-danger-bg: #7F1D1D;
+  --color-danger-text: #FCA5A5;
+  --color-info: #3B82F6;
+  --color-info-bg: #1E3A8A;
+  --color-info-text: #93C5FD;
+
+  /* ── Text ───────────────────────────────────────────────────────── */
+  --color-text-primary: #F9FAFB;
+  --color-text-secondary: #9CA3AF;
+  --color-text-tertiary: #6B7280;
+  --color-text-disabled: #4B5563;
+  --color-text-inverse: #111827;
+
+  /* ── Borders ────────────────────────────────────────────────────── */
+  --color-border: #1F2937;
+  --color-border-muted: #162032;
+  --color-border-strong: #374151;
+  --color-border-focus: #8DA37B;
+
+  /* ── Shadows ────────────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.6), 0 8px 10px -6px rgb(0 0 0 / 0.6);
+}
+
+html.dark .shimmer, .dark .shimmer {
+  background: linear-gradient(90deg, #1F2937 0%, #374151 40%, #1F2937 80%);
+  background-size: 400px 100%;
+}
+
+html.dark .btn-primary, .dark .btn-primary {
+  color: #111827;
+  background-color: #F3F4F6;
+}
+html.dark .btn-primary:hover, .dark .btn-primary:hover {
+  background-color: #FFFFFF;
+}
+
 @layer base {
   html { font-family: var(--font-body); }
   body {

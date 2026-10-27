@@ -45,7 +45,10 @@ export default function AnalyticsPage() {
 
   const analytics = data?.data;
   const totalOrders = analytics?.ordersByStatus.reduce((s, o) => s + o.count, 0) ?? 0;
-  const maxDayRevenue = Math.max(...(analytics?.revenueByDay.map(d => d.revenue) ?? [1]));
+  const rawRevenueByDay = analytics?.revenueByDay ?? [];
+  const totalRevenueRecorded = rawRevenueByDay.reduce((sum, d) => sum + Number(d.revenue || 0), 0);
+  const hasRevenue = totalRevenueRecorded > 0;
+  const maxDayRevenue = Math.max(...rawRevenueByDay.map(d => Number(d.revenue || 0)), 1);
 
   return (
     <div className="space-y-6">
@@ -59,7 +62,7 @@ export default function AnalyticsPage() {
             <button
               key={p.value}
               onClick={() => setDays(p.value)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
                 days === p.value
                   ? "bg-[var(--color-primary)] text-white"
                   : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)]"
@@ -110,45 +113,98 @@ export default function AnalyticsPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Revenue Chart */}
         <div className="lg:col-span-2 card">
-          <div className="border-b border-[var(--color-border)] px-5 py-4">
+          <div className="border-b border-[var(--color-border)] px-5 py-4 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-              <Calendar size={14} /> Revenue Over Time
+              <Calendar size={14} className="text-[var(--color-accent)]" /> Revenue Over Time
             </h2>
+            {hasRevenue && (
+              <span className="text-xs font-medium text-[var(--color-text-tertiary)]">
+                Peak: ₹{maxDayRevenue.toLocaleString()}
+              </span>
+            )}
           </div>
           <div className="p-5">
             {isLoading ? (
-              <div className="h-48 shimmer rounded-lg" />
-            ) : !analytics?.revenueByDay.length ? (
-              <div className="h-48 flex items-center justify-center">
-                <p className="text-sm text-[var(--color-text-tertiary)]">No revenue data for this period</p>
+              <div className="h-56 shimmer rounded-lg" />
+            ) : !hasRevenue ? (
+              <div className="h-56 flex flex-col items-center justify-center gap-2 text-center px-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-bg-muted)] text-[var(--color-text-tertiary)]">
+                  <BarChart3 size={22} />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-text-secondary)]">
+                    No revenue data for this period
+                  </p>
+                  <p className="text-xs text-[var(--color-text-tertiary)] mt-0.5">
+                    Orders completed in the last {days} days will appear here
+                  </p>
+                </div>
               </div>
             ) : (
-              <div className="space-y-2">
-                {/* Simple bar chart */}
-                <div className="flex items-end gap-[2px] h-40">
-                  {analytics.revenueByDay.map((day, i) => {
-                    const height = maxDayRevenue > 0 ? (day.revenue / maxDayRevenue) * 100 : 0;
+              <div className="space-y-3">
+                {/* Visual Bar Chart */}
+                <div className="relative h-44 w-full flex items-end gap-1 sm:gap-2 pt-6">
+                  {/* Subtle horizontal grid lines */}
+                  <div className="absolute inset-x-0 top-6 border-b border-dashed border-[var(--color-border)] opacity-60 pointer-events-none" />
+                  <div className="absolute inset-x-0 top-1/2 border-b border-dashed border-[var(--color-border)] opacity-60 pointer-events-none" />
+                  <div className="absolute inset-x-0 bottom-0 border-b border-[var(--color-border)] pointer-events-none" />
+
+                  {rawRevenueByDay.map((day, i) => {
+                    const rev = Number(day.revenue || 0);
+                    const heightPct = maxDayRevenue > 0 ? (rev / maxDayRevenue) * 100 : 0;
                     return (
-                      <div key={i} className="flex-1 group relative">
-                        <div
-                          className="w-full rounded-t bg-[var(--color-accent)] hover:bg-[var(--color-primary)] transition-colors cursor-pointer"
-                          style={{ height: `${Math.max(height, 2)}%` }}
-                          title={`${new Date(day.day).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}: ₹${Number(day.revenue).toLocaleString()} (${day.orders} orders)`}
-                        />
+                      <div
+                        key={i}
+                        className="flex-1 h-full flex flex-col justify-end items-center group relative min-w-[4px]"
+                      >
                         {/* Tooltip */}
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                          <div className="bg-[var(--color-text-primary)] text-white text-[9px] rounded px-2 py-1 whitespace-nowrap">
-                            ₹{Number(day.revenue).toLocaleString()} · {day.orders} orders
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-20 shadow-lg">
+                          <div className="bg-[var(--color-primary)] text-white text-[10px] rounded-lg px-2.5 py-1.5 whitespace-nowrap text-center">
+                            <p className="font-bold">₹{rev.toLocaleString()}</p>
+                            <p className="text-[9px] opacity-80 mt-0.5">
+                              {new Date(day.day).toLocaleDateString("en-IN", {
+                                day: "numeric",
+                                month: "short",
+                              })} · {day.orders} order{day.orders === 1 ? "" : "s"}
+                            </p>
                           </div>
                         </div>
+
+                        {/* Bar */}
+                        <div
+                          className="w-full rounded-t bg-[var(--color-accent)] hover:bg-[var(--color-primary)] transition-all duration-200 cursor-pointer"
+                          style={{ height: `${Math.max(heightPct, 4)}%` }}
+                        />
                       </div>
                     );
                   })}
                 </div>
+
                 {/* X axis labels */}
-                <div className="flex justify-between text-[9px] text-[var(--color-text-disabled)]">
-                  <span>{analytics.revenueByDay[0] ? new Date(analytics.revenueByDay[0].day).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : ""}</span>
-                  <span>{analytics.revenueByDay.at(-1) ? new Date(analytics.revenueByDay.at(-1)!.day).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : ""}</span>
+                <div className="flex justify-between text-[10px] font-medium text-[var(--color-text-secondary)] pt-1">
+                  <span>
+                    {rawRevenueByDay[0]
+                      ? new Date(rawRevenueByDay[0].day).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                        })
+                      : ""}
+                  </span>
+                  {rawRevenueByDay.length > 2 && (
+                    <span>
+                      {new Date(
+                        rawRevenueByDay[Math.floor(rawRevenueByDay.length / 2)].day
+                      ).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                    </span>
+                  )}
+                  <span>
+                    {rawRevenueByDay.at(-1)
+                      ? new Date(rawRevenueByDay.at(-1)!.day).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                        })
+                      : ""}
+                  </span>
                 </div>
               </div>
             )}

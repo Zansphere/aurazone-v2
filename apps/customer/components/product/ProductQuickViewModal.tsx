@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { X, Check, ShoppingCart, Star, Heart, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
 import { useCartStore } from "@/stores/cart.store";
 import { useAuthStore } from "@/stores/auth.store";
@@ -15,6 +16,7 @@ interface ProductQuickViewProps {
 }
 
 export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuickViewProps) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { addToCart, isLoading: cartLoading } = useCartStore();
   const { isAuthenticated } = useAuthStore();
@@ -56,7 +58,10 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
   const isWishlisted = !!wishlistItem;
 
   const handleWishlistToggle = () => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      router.push("/login");
+      return;
+    }
     if (isWishlisted) removeWishlistMutation.mutate(wishlistItem.id);
     else addWishlistMutation.mutate({ productId: product.id, variantId: variant?.id });
   };
@@ -81,7 +86,8 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
         {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20 text-[var(--color-text-secondary)] transition-colors"
+          className="absolute right-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20 text-[var(--color-text-secondary)] transition-colors shadow-sm"
+          title="Close"
         >
           <X size={18} />
         </button>
@@ -104,6 +110,19 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
                   -{discount}%
                 </span>
               )}
+
+              {/* Floating Wishlist button on image preview */}
+              <button
+                onClick={handleWishlistToggle}
+                title={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+                className={`absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full shadow-sm backdrop-blur-md transition-all ${
+                  isWishlisted
+                    ? "bg-red-50 text-red-500 border border-red-200"
+                    : "bg-white/90 dark:bg-black/70 text-[var(--color-text-secondary)] hover:text-red-500 hover:bg-white"
+                }`}
+              >
+                <Heart size={15} className={isWishlisted ? "fill-current" : ""} />
+              </button>
 
               {/* Prev / Next buttons for images */}
               {images.length > 1 && (
@@ -144,22 +163,10 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
           {/* Details */}
           <div className="p-6 flex flex-col justify-between space-y-4">
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between pr-10">
                 <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-accent)]">
                   {product.brand || product.store?.name || "AuraZone"}
                 </span>
-                {isAuthenticated && (
-                  <button
-                    onClick={handleWishlistToggle}
-                    className={`flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
-                      isWishlisted
-                        ? "border-red-300 bg-red-50 text-red-500"
-                        : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-red-500"
-                    }`}
-                  >
-                    <Heart size={16} className={isWishlisted ? "fill-current" : ""} />
-                  </button>
-                )}
               </div>
 
               <h2 className="text-lg md:text-xl font-bold text-[var(--color-text-primary)] leading-snug">
@@ -272,6 +279,18 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
                       <ShoppingCart size={14} /> {cartLoading ? "Adding..." : "Add to Cart"}
                     </>
                   )}
+                </button>
+
+                <button
+                  onClick={handleWishlistToggle}
+                  title={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-all ${
+                    isWishlisted
+                      ? "border-red-300 bg-red-50 text-red-500 shadow-sm"
+                      : "border-[var(--color-border)] bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)] hover:text-red-500 hover:border-red-200"
+                  }`}
+                >
+                  <Heart size={18} className={isWishlisted ? "fill-current text-red-500" : ""} />
                 </button>
               </div>
 

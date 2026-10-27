@@ -102,7 +102,7 @@ export async function holdInventory(
     return currentInv;
   };
 
-  return externalTx ? run(externalTx) : prisma.$transaction(run);
+  return externalTx ? run(externalTx) : prisma.$transaction(run, { maxWait: 10000, timeout: 30000 });
 }
 
 /**
@@ -168,7 +168,7 @@ export async function releaseInventory(
     });
   };
 
-  return externalTx ? run(externalTx) : prisma.$transaction(run);
+  return externalTx ? run(externalTx) : prisma.$transaction(run, { maxWait: 10000, timeout: 30000 });
 }
 
 /**
@@ -185,20 +185,28 @@ export async function commitOrderInventory(
   // CRITICAL: Sort items by variantId to prevent database deadlock
   const sortedItems = [...items].sort((a, b) => a.variantId.localeCompare(b.variantId));
 
+  // Batch query active reservations for all cart items in this checkout to minimize roundtrips
+  const cartItemIds = sortedItems.map((i) => i.cartItemId).filter(Boolean) as string[];
+  const reservations = cartItemIds.length > 0
+    ? await tx.inventoryReservation.findMany({
+        where: { cartItemId: { in: cartItemIds } },
+      })
+    : [];
+  const reservationMap = new Map(reservations.map((r) => [r.cartItemId, r]));
+
+  const consumedReservationIds: string[] = [];
+  const logsToCreate: Prisma.InventoryLogCreateManyInput[] = [];
+
   for (const item of sortedItems) {
     const qty = item.quantity;
 
     // Check if an active reservation exists for this cart item
     let reservedRelease = 0;
-    let reservation = null;
+    const reservation = item.cartItemId ? reservationMap.get(item.cartItemId) : null;
 
-    if (item.cartItemId) {
-      reservation = await tx.inventoryReservation.findUnique({
-        where: { cartItemId: item.cartItemId },
-      });
-      if (reservation && reservation.status === "ACTIVE") {
-        reservedRelease = Math.min(qty, reservation.quantity);
-      }
+    if (reservation && reservation.status === "ACTIVE") {
+      reservedRelease = Math.min(qty, reservation.quantity);
+      consumedReservationIds.push(reservation.id);
     }
 
     // Atomic conditional decrement of physical quantity and reserved counter
@@ -219,30 +227,34 @@ export async function commitOrderInventory(
 
     const currentInv = result[0];
 
-    // Transition reservation state to CONSUMED
-    if (reservation) {
-      await tx.inventoryReservation.update({
-        where: { id: reservation.id },
-        data: {
-          status: "CONSUMED",
-          orderId,
-        },
-      });
-    }
+    logsToCreate.push({
+      variantId: item.variantId,
+      orderId,
+      quantity: -qty,
+      balanceAfter: currentInv.quantity,
+      reservedAfter: currentInv.reserved,
+      type: "SOLD",
+      performedBy: actorId ?? null,
+      note: `Committed for order ${orderNumber}`,
+      correlationId: orderId,
+    });
+  }
 
-    // Append-only movement ledger
-    await tx.inventoryLog.create({
+  // Batch transition reservation state to CONSUMED
+  if (consumedReservationIds.length > 0) {
+    await tx.inventoryReservation.updateMany({
+      where: { id: { in: consumedReservationIds } },
       data: {
-        variantId: item.variantId,
+        status: "CONSUMED",
         orderId,
-        quantity: -qty,
-        balanceAfter: currentInv.quantity,
-        reservedAfter: currentInv.reserved,
-        type: "SOLD",
-        performedBy: actorId ?? null,
-        note: `Committed for order ${orderNumber}`,
-        correlationId: orderId,
       },
+    });
+  }
+
+  // Batch append-only movement ledger
+  if (logsToCreate.length > 0) {
+    await tx.inventoryLog.createMany({
+      data: logsToCreate,
     });
   }
 }
@@ -288,5 +300,5 @@ export async function restockInventory(
     return currentInv;
   };
 
-  return externalTx ? run(externalTx) : prisma.$transaction(run);
+  return externalTx ? run(externalTx) : prisma.$transaction(run, { maxWait: 10000, timeout: 30000 });
 }

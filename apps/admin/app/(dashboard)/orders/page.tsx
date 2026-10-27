@@ -77,21 +77,9 @@ export default function OrdersPage() {
 
   const handleExportOrders = async () => {
     try {
-      const token = localStorage.getItem("accessToken") || "";
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api/v1"}/admin/export/orders`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "aurazone_orders_export.csv";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch {
-      alert("Failed to export orders CSV");
+      await api.download("/admin/export/orders", "aurazone_orders_export.csv");
+    } catch (err: any) {
+      alert(err.message || "Failed to export orders CSV");
     }
   };
 

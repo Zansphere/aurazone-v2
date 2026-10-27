@@ -235,38 +235,40 @@ export async function createOrderFromCart(
   const trackingToken = paymentMethod === "COD" ? crypto.randomBytes(16).toString("hex") : null;
   const storeIds = [...new Set(cart.items.map((i) => i.variant.product.storeId))];
 
-  // 4. Atomic Database Transaction: Order creation, conditional coupon increment, sorted inventory commit, cart closure
-  const order = await prisma.$transaction(async (tx) => {
-    const stores = await tx.store.findMany({
-      where: { id: { in: storeIds } },
-      select: { id: true, name: true },
-    });
-    const storeMap = Object.fromEntries(stores.map((s) => [s.id, s.name]));
+  // Pre-fetch stores and guestSession OUTSIDE the transaction to avoid holding DB transaction locks
+  const stores = await prisma.store.findMany({
+    where: { id: { in: storeIds } },
+    select: { id: true, name: true },
+  });
+  const storeMap = Object.fromEntries(stores.map((s) => [s.id, s.name]));
 
-    let validSessionId: string | null = null;
-    if (!userId) {
-      const candidateId = cart.sessionId ?? sessionId;
-      if (candidateId) {
-        const guestSession = await tx.guestSession.findFirst({
-          where: {
-            OR: [{ id: candidateId }, { sessionId: candidateId }],
-          },
-        });
-        validSessionId = guestSession?.id ?? null;
-      }
-    }
-
-    // Atomically transition cart from ACTIVE to ORDERED to prevent race checkouts
-    const updatedCart = await tx.cart.updateMany({
-      where: { id: cart.id, status: "ACTIVE" },
-      data: { status: "ORDERED" },
-    });
-
-    if (updatedCart.count === 0) {
-      throw Object.assign(new Error("Cart has already been checked out or is no longer active"), {
-        statusCode: 409,
+  let validSessionId: string | null = null;
+  if (!userId) {
+    const candidateId = cart.sessionId ?? sessionId;
+    if (candidateId) {
+      const guestSession = await prisma.guestSession.findFirst({
+        where: {
+          OR: [{ id: candidateId }, { sessionId: candidateId }],
+        },
       });
+      validSessionId = guestSession?.id ?? null;
     }
+  }
+
+  // 4. Atomic Database Transaction: Order creation, conditional coupon increment, sorted inventory commit, cart closure
+  const order = await prisma.$transaction(
+    async (tx) => {
+      // Atomically transition cart from ACTIVE to ORDERED to prevent race checkouts
+      const updatedCart = await tx.cart.updateMany({
+        where: { id: cart.id, status: "ACTIVE" },
+        data: { status: "ORDERED" },
+      });
+
+      if (updatedCart.count === 0) {
+        throw Object.assign(new Error("Cart has already been checked out or is no longer active"), {
+          statusCode: 409,
+        });
+      }
 
     // Create Order with immutable snapshot of item prices, product metadata, store name, address
     const newOrder = await tx.order.create({
@@ -364,6 +366,10 @@ export async function createOrderFromCart(
     });
 
     return newOrder;
+  },
+  {
+    maxWait: 10000,
+    timeout: 30000,
   });
 
   // 5. External side effect: Send confirmation email OUTSIDE the database transaction
@@ -531,7 +537,8 @@ export async function failOrder(id: string) {
     });
   }
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(
+    async (tx) => {
     // 1. Transition order and payment status
     await tx.order.update({
       where: { id },
@@ -623,6 +630,10 @@ export async function failOrder(id: string) {
         }
       }
     }
+  },
+  {
+    maxWait: 10000,
+    timeout: 30000,
   });
 
   // Non-blocking email
@@ -702,7 +713,8 @@ export async function initiateRefund(options: {
   const primaryPayment = order.payments[0];
 
   // Atomic database transaction
-  const refund = await prisma.$transaction(async (tx) => {
+  const refund = await prisma.$transaction(
+    async (tx) => {
     // 1. Create durable Refund record
     const newRefund = await tx.refund.create({
       data: {
@@ -774,6 +786,10 @@ export async function initiateRefund(options: {
     });
 
     return newRefund;
+  },
+  {
+    maxWait: 10000,
+    timeout: 30000,
   });
 
   return refund;

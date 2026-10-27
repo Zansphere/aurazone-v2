@@ -356,6 +356,17 @@ function AppearanceTab() {
   useEffect(() => {
     const saved = localStorage.getItem("aurazone-admin-theme") ?? "system";
     setTheme(saved);
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = () => {
+      const current = localStorage.getItem("aurazone-admin-theme") ?? "system";
+      if (current === "system") {
+        document.documentElement.classList.toggle("dark", mediaQuery.matches);
+      }
+    };
+
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
 
   const applyTheme = (t: string) => {
@@ -369,11 +380,8 @@ function AppearanceTab() {
       root.classList.remove("dark");
     } else {
       // System preference
-      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-        root.classList.add("dark");
-      } else {
-        root.classList.remove("dark");
-      }
+      const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      root.classList.toggle("dark", isDark);
     }
   };
 
@@ -385,21 +393,30 @@ function AppearanceTab() {
 
   return (
     <div className="card p-5 space-y-4">
-      <p className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide">Theme</p>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide">Theme</p>
+          <p className="text-xs text-[var(--color-text-tertiary)] mt-0.5">Customize the visual appearance of the admin panel</p>
+        </div>
+        <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)] capitalize">
+          Current: {theme}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {themes.map((t) => (
           <button
             key={t.key}
+            type="button"
             onClick={() => applyTheme(t.key)}
-            className={`rounded-xl border-2 p-4 text-center transition-all hover:shadow-md ${
+            className={`rounded-xl border-2 p-4 text-center transition-all hover:shadow-md cursor-pointer ${
               theme === t.key
                 ? "border-[var(--color-accent)] bg-[var(--color-accent-light)]"
-                : "border-[var(--color-border)] hover:border-[var(--color-text-tertiary)]"
+                : "border-[var(--color-border)] hover:border-[var(--color-text-tertiary)] bg-[var(--color-bg-surface)]"
             }`}
           >
             <t.icon size={24} className={`mx-auto mb-2 ${theme === t.key ? "text-[var(--color-accent)]" : "text-[var(--color-text-tertiary)]"}`} />
-            <p className="text-sm font-medium text-[var(--color-text-primary)]">{t.label}</p>
-            <p className="text-[10px] text-[var(--color-text-tertiary)] mt-0.5">{t.desc}</p>
+            <p className="text-sm font-semibold text-[var(--color-text-primary)]">{t.label}</p>
+            <p className="text-[11px] text-[var(--color-text-tertiary)] mt-0.5">{t.desc}</p>
           </button>
         ))}
       </div>

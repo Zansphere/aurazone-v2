@@ -19,6 +19,96 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", requireRole("SUPER_ADMIN"));
 
   // ╔═══════════════════════════════════════════════════════════════╗
+  // ║  GLOBAL ADMIN SEARCH                                         ║
+  // ╚═══════════════════════════════════════════════════════════════╝
+
+  fastify.get("/search", async (request, reply) => {
+    const query = request.query as { q?: string };
+    const q = (query.q ?? "").trim();
+    if (!q) {
+      return sendSuccess(reply, { orders: [], products: [], customers: [], stores: [] });
+    }
+
+    const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
+
+    const [orders, products, customers, stores] = await Promise.all([
+      prisma.order.findMany({
+        where: {
+          OR: [
+            { orderNumber: { contains: q, mode: "insensitive" } },
+            { user: { fullName: { contains: q, mode: "insensitive" } } },
+            { user: { email: { contains: q, mode: "insensitive" } } },
+            { orderAddress: { name: { contains: q, mode: "insensitive" } } },
+          ],
+          ...(allowedStoreIds ? { items: { some: { variant: { product: { storeId: { in: allowedStoreIds } } } } } } : {}),
+        },
+        select: {
+          id: true,
+          orderNumber: true,
+          totalAmount: true,
+          status: true,
+          createdAt: true,
+          user: { select: { fullName: true, email: true } },
+          orderAddress: { select: { name: true } },
+        },
+        take: 5,
+        orderBy: { createdAt: "desc" },
+      }),
+
+      prisma.product.findMany({
+        where: {
+          deletedAt: null,
+          OR: [
+            { name: { contains: q, mode: "insensitive" } },
+            { brand: { contains: q, mode: "insensitive" } },
+            { variants: { some: { sku: { contains: q, mode: "insensitive" } } } },
+          ],
+          ...(allowedStoreIds ? { storeId: { in: allowedStoreIds } } : {}),
+        },
+        select: {
+          id: true,
+          name: true,
+          brand: true,
+          store: { select: { name: true } },
+        },
+        take: 5,
+      }),
+
+      prisma.user.findMany({
+        where: {
+          role: "CUSTOMER",
+          OR: [
+            { fullName: { contains: q, mode: "insensitive" } },
+            { email: { contains: q, mode: "insensitive" } },
+            { phone: { contains: q, mode: "insensitive" } },
+          ],
+        },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+        },
+        take: 5,
+      }),
+
+      prisma.store.findMany({
+        where: {
+          name: { contains: q, mode: "insensitive" },
+          ...(allowedStoreIds ? { id: { in: allowedStoreIds } } : {}),
+        },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+        },
+        take: 5,
+      }),
+    ]);
+
+    return sendSuccess(reply, { orders, products, customers, stores });
+  });
+
+  // ╔═══════════════════════════════════════════════════════════════╗
   // ║  STORES                                                       ║
   // ╚═══════════════════════════════════════════════════════════════╝
 

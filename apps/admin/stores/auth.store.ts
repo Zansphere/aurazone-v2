@@ -31,13 +31,22 @@ export const useAuthStore = create<AuthState>((set) => ({
       password,
     });
     if (res.data) {
+      if (typeof window !== "undefined" && res.data.accessToken) {
+        localStorage.setItem("accessToken", res.data.accessToken);
+      }
       set({ user: res.data.user, isAuthenticated: true });
     }
   },
 
   logout: async () => {
-    await api.post("/auth/logout");
-    set({ user: null, isAuthenticated: false });
+    try {
+      await api.post("/auth/logout");
+    } finally {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("accessToken");
+      }
+      set({ user: null, isAuthenticated: false });
+    }
   },
 
   fetchUser: async () => {

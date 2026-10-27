@@ -137,44 +137,50 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Atomic confirmation transaction
-    await prisma.$transaction(async (tx) => {
-      // 1. Update Payment attempt
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: {
-          gatewayPaymentId: razorpayPaymentId,
-          status: "SUCCESS",
-          paidAt: new Date(),
-        },
-      });
+    await prisma.$transaction(
+      async (tx) => {
+        // 1. Update Payment attempt
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            gatewayPaymentId: razorpayPaymentId,
+            status: "SUCCESS",
+            paidAt: new Date(),
+          },
+        });
 
-      // 2. Transition Order to RECEIVED status via State Machine
-      const trackingToken = payment.order.trackingToken || crypto.randomBytes(16).toString("hex");
-      await tx.order.update({
-        where: { id: payment.orderId },
-        data: {
-          status: "RECEIVED",
-          paymentStatus: "SUCCESS",
-          razorpayPaymentId,
-          razorpayOrderId,
-          trackingToken,
-        },
-      });
+        // 2. Transition Order to RECEIVED status via State Machine
+        const trackingToken = payment.order.trackingToken || crypto.randomBytes(16).toString("hex");
+        await tx.order.update({
+          where: { id: payment.orderId },
+          data: {
+            status: "RECEIVED",
+            paymentStatus: "SUCCESS",
+            razorpayPaymentId,
+            razorpayOrderId,
+            trackingToken,
+          },
+        });
 
-      // 3. Log confirmation
-      await tx.paymentLog.create({
-        data: {
-          orderId: payment.orderId,
-          paymentId: payment.id,
-          orderNumberSnapshot: payment.order.orderNumber,
-          action: "PAYMENT_CAPTURED",
-          fromStatus: payment.status,
-          toStatus: "SUCCESS",
-          amount: payment.amount,
-          note: `Payment verified via signature for Razorpay Payment ID ${razorpayPaymentId}`,
-        },
-      });
-    });
+        // 3. Log confirmation
+        await tx.paymentLog.create({
+          data: {
+            orderId: payment.orderId,
+            paymentId: payment.id,
+            orderNumberSnapshot: payment.order.orderNumber,
+            action: "PAYMENT_CAPTURED",
+            fromStatus: payment.status,
+            toStatus: "SUCCESS",
+            amount: payment.amount,
+            note: `Payment verified via signature for Razorpay Payment ID ${razorpayPaymentId}`,
+          },
+        });
+      },
+      {
+        maxWait: 10000,
+        timeout: 30000,
+      }
+    );
 
     // Send order confirmation / RECEIVED status update
     try {
@@ -331,41 +337,47 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
 
           // Normal payment confirmation
           if (payment.status !== "SUCCESS") {
-            await prisma.$transaction(async (tx) => {
-              await tx.payment.update({
-                where: { id: payment.id },
-                data: {
-                  gatewayPaymentId: paymentEntity.id,
-                  status: "SUCCESS",
-                  paidAt: new Date(),
-                },
-              });
+            await prisma.$transaction(
+              async (tx) => {
+                await tx.payment.update({
+                  where: { id: payment.id },
+                  data: {
+                    gatewayPaymentId: paymentEntity.id,
+                    status: "SUCCESS",
+                    paidAt: new Date(),
+                  },
+                });
 
-              const trackingToken = payment.order.trackingToken || crypto.randomBytes(16).toString("hex");
-              await tx.order.update({
-                where: { id: payment.orderId },
-                data: {
-                  status: "RECEIVED",
-                  paymentStatus: "SUCCESS",
-                  razorpayPaymentId: paymentEntity.id,
-                  razorpayOrderId: paymentEntity.order_id,
-                  trackingToken,
-                },
-              });
+                const trackingToken = payment.order.trackingToken || crypto.randomBytes(16).toString("hex");
+                await tx.order.update({
+                  where: { id: payment.orderId },
+                  data: {
+                    status: "RECEIVED",
+                    paymentStatus: "SUCCESS",
+                    razorpayPaymentId: paymentEntity.id,
+                    razorpayOrderId: paymentEntity.order_id,
+                    trackingToken,
+                  },
+                });
 
-              await tx.paymentLog.create({
-                data: {
-                  orderId: payment.orderId,
-                  paymentId: payment.id,
-                  orderNumberSnapshot: payment.order.orderNumber,
-                  action: "WEBHOOK_PAYMENT_CAPTURED",
-                  fromStatus: payment.status,
-                  toStatus: "SUCCESS",
-                  amount: payment.amount,
-                  note: `Confirmed via Razorpay webhook (Payment ID: ${paymentEntity.id})`,
-                },
-              });
-            });
+                await tx.paymentLog.create({
+                  data: {
+                    orderId: payment.orderId,
+                    paymentId: payment.id,
+                    orderNumberSnapshot: payment.order.orderNumber,
+                    action: "WEBHOOK_PAYMENT_CAPTURED",
+                    fromStatus: payment.status,
+                    toStatus: "SUCCESS",
+                    amount: payment.amount,
+                    note: `Confirmed via Razorpay webhook (Payment ID: ${paymentEntity.id})`,
+                  },
+                });
+              },
+              {
+                maxWait: 10000,
+                timeout: 30000,
+              }
+            );
 
             // Send order confirmation / RECEIVED status update
             try {

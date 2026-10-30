@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useCartStore } from "@/stores/cart.store";
 import { useAuthStore } from "@/stores/auth.store";
+import { useWishlistStore } from "@/stores/wishlist.store";
 import { ProductCard } from "@/components/product/ProductCard";
 import { ProductLightboxModal } from "@/components/product/ProductLightboxModal";
 import { SizeChartModal } from "@/components/product/SizeChartModal";
@@ -31,6 +32,7 @@ import {
   Tag,
   X,
   Calendar,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 import { useCouponStore } from "@/stores/coupon.store";
@@ -40,8 +42,10 @@ export default function ProductDetailPage() {
   const router = useRouter();
   const slug = params.slug as string;
   const queryClient = useQueryClient();
-  const { addToCart, isLoading: cartLoading } = useCartStore();
+  const { addToCart, isVariantAdding } = useCartStore();
   const { isAuthenticated } = useAuthStore();
+  const hasWishlistItem = useWishlistStore((s) => s.hasItem);
+  const toggleWishlist = useWishlistStore((s) => s.toggle);
   const {
     appliedCoupon,
     applyCoupon,
@@ -56,6 +60,8 @@ export default function ProductDetailPage() {
   const [quantity, setQuantity] = useState(1);
   const [addedToCart, setAddedToCart] = useState(false);
   const [addedBundle, setAddedBundle] = useState(false);
+  const [isBuyingNow, setIsBuyingNow] = useState(false);
+  const [isAddingBundle, setIsAddingBundle] = useState(false);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewBody, setReviewBody] = useState("");
   const [showReviewForm, setShowReviewForm] = useState(false);
@@ -91,25 +97,9 @@ export default function ProductDetailPage() {
     queryFn: () => api.get<any[]>(`/products/${slug}/related`),
   });
 
-  const { data: wishlistData } = useQuery({
-    queryKey: ["wishlist"],
-    queryFn: () => api.get<any[]>("/wishlist"),
-    enabled: isAuthenticated,
-  });
-
   const { data: reviewsData } = useQuery({
     queryKey: ["reviews", slug],
     queryFn: () => api.get<any[]>(`/products/${slug}/reviews`),
-  });
-
-  const addWishlistMutation = useMutation({
-    mutationFn: (body: { productId: string; variantId?: string }) => api.post("/wishlist", body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["wishlist"] }),
-  });
-
-  const removeWishlistMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/wishlist/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["wishlist"] }),
   });
 
   const submitReviewMutation = useMutation({
@@ -126,9 +116,8 @@ export default function ProductDetailPage() {
   const variant = product?.variants?.[selectedVariantIdx];
   const reviews: any[] = reviewsData?.data ?? [];
   const relatedProducts: any[] = relatedData?.data ?? [];
-  const wishlistItems: any[] = wishlistData?.data ?? [];
-  const wishlistItem = wishlistItems.find((w) => w.productId === product?.id);
-  const isWishlisted = !!wishlistItem;
+  const isWishlisted = product?.id ? hasWishlistItem(product.id) : false;
+  const isAdding = variant?.id ? isVariantAdding(variant.id) : false;
 
   const validatePincode = (pin: string) => {
     if (!/^\d{6}$/.test(pin)) {
@@ -162,14 +151,24 @@ export default function ProductDetailPage() {
       window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
-    if (isWishlisted) removeWishlistMutation.mutate(wishlistItem.id);
-    else addWishlistMutation.mutate({ productId: product.id, variantId: variant?.id });
+    if (product) {
+      toggleWishlist(product.id, variant?.id);
+    }
   };
 
   const handleAddToCart = async () => {
-    if (!variant) return;
+    if (!variant || !product) return;
     try {
-      await addToCart(variant.id, quantity);
+      const images = variant?.images ?? [];
+      const price = Number(variant?.price ?? 0);
+      const preview = {
+        productName: product.name,
+        productSlug: product.slug,
+        variantName: variant.attributes?.map((a: any) => a.value).join(" / ") || variant.sku,
+        imageUrl: images[0]?.url,
+        price,
+      };
+      await addToCart(variant.id, quantity, preview, true);
       setAddedToCart(true);
       setTimeout(() => setAddedToCart(false), 2000);
     } catch {
@@ -178,12 +177,22 @@ export default function ProductDetailPage() {
   };
 
   const handleBuyNow = async () => {
-    if (!variant) return;
+    if (!variant || !product || isBuyingNow) return;
+    setIsBuyingNow(true);
     try {
-      await addToCart(variant.id, quantity);
+      const images = variant?.images ?? [];
+      const price = Number(variant?.price ?? 0);
+      const preview = {
+        productName: product.name,
+        productSlug: product.slug,
+        variantName: variant.attributes?.map((a: any) => a.value).join(" / ") || variant.sku,
+        imageUrl: images[0]?.url,
+        price,
+      };
+      await addToCart(variant.id, quantity, preview, false);
       router.push("/checkout");
     } catch {
-      /* Handled in store */
+      setIsBuyingNow(false);
     }
   };
 
@@ -236,14 +245,17 @@ export default function ProductDetailPage() {
   const bundleCombinedPrice = Math.round((price + bundlePrice) * 0.95); // 5% bundle discount
 
   const handleAddBundle = async () => {
-    if (!variant || !bundleVariant) return;
+    if (!variant || !bundleVariant || isAddingBundle) return;
+    setIsAddingBundle(true);
     try {
-      await addToCart(variant.id, 1);
-      await addToCart(bundleVariant.id, 1);
+      await addToCart(variant.id, 1, undefined, false);
+      await addToCart(bundleVariant.id, 1, undefined, true);
       setAddedBundle(true);
       setTimeout(() => setAddedBundle(false), 2500);
     } catch {
       /* Handled */
+    } finally {
+      setIsAddingBundle(false);
     }
   };
 
@@ -730,7 +742,7 @@ export default function ProductDetailPage() {
 
             <button
               onClick={handleAddToCart}
-              disabled={stock === 0 || cartLoading}
+              disabled={stock === 0 || isAdding || isBuyingNow}
               className={`flex-1 flex items-center justify-center gap-2 rounded-xl py-3 px-4 text-sm font-semibold transition-all ${addedToCart
                 ? "bg-emerald-500 text-white"
                 : "bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] shadow-md"
@@ -740,19 +752,29 @@ export default function ProductDetailPage() {
                 <>
                   <Check size={16} /> Added to Cart
                 </>
+              ) : isAdding ? (
+                <>
+                  <Loader2 className="animate-spin" size={16} /> Adding...
+                </>
               ) : (
                 <>
-                  <ShoppingCart size={16} /> {cartLoading ? "Adding..." : "Add to Cart"}
+                  <ShoppingCart size={16} /> Add to Cart
                 </>
               )}
             </button>
 
             <button
               onClick={handleBuyNow}
-              disabled={stock === 0 || cartLoading}
+              disabled={stock === 0 || isAdding || isBuyingNow}
               className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 px-4 text-sm font-semibold bg-[var(--color-accent)] text-white hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
             >
-              Buy Now
+              {isBuyingNow ? (
+                <>
+                  <Loader2 className="animate-spin" size={16} /> Redirecting...
+                </>
+              ) : (
+                "Buy Now"
+              )}
             </button>
 
             <button
@@ -909,11 +931,17 @@ export default function ProductDetailPage() {
 
               <button
                 onClick={handleAddBundle}
-                disabled={cartLoading}
-                className="flex items-center gap-1.5 rounded-xl bg-[var(--color-primary)] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-all shadow-sm"
+                disabled={isAddingBundle}
+                className="flex items-center gap-1.5 rounded-xl bg-[var(--color-primary)] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-all shadow-sm disabled:opacity-50"
               >
-                {addedBundle ? <Check size={14} /> : <ShoppingCart size={14} />}
-                {addedBundle ? "Bundle Added!" : "Add Both to Cart"}
+                {isAddingBundle ? (
+                  <Loader2 className="animate-spin" size={14} />
+                ) : addedBundle ? (
+                  <Check size={14} />
+                ) : (
+                  <ShoppingCart size={14} />
+                )}
+                {isAddingBundle ? "Adding..." : addedBundle ? "Bundle Added!" : "Add Both to Cart"}
               </button>
             </div>
           </div>

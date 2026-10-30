@@ -1,13 +1,13 @@
 "use client";
 
 import { useCartStore } from "@/stores/cart.store";
-import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight } from "lucide-react";
+import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export function CartDrawer() {
-  const { cart, isOpen, setIsOpen, updateQuantity, removeItem, isLoading } = useCartStore();
+  const { cart, isOpen, setIsOpen, updateQuantity, removeItem, isItemMutating } = useCartStore();
   const router = useRouter();
 
   // Close on ESC
@@ -73,74 +73,84 @@ export function CartDrawer() {
             </div>
           ) : (
             <div className="space-y-6">
-              {items.map((item) => (
-                <div key={item.id} className="flex gap-4 group">
-                  <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-[var(--color-bg-muted)] border border-[var(--color-border)]">
-                    {item.variant.images?.[0] ? (
-                      <img src={item.variant.images[0].url} alt={item.variant.product.name} className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-[var(--color-text-tertiary)]">
-                        <ShoppingBag size={20} />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-1 flex-col justify-between py-1">
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-start gap-2">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-accent)]">
-                            {item.variant.product.store.name}
-                          </p>
-                          <Link 
-                            href={`/product/${item.variant.product.slug}`} 
-                            onClick={() => setIsOpen(false)}
-                            className="text-sm font-semibold text-[var(--color-text-primary)] line-clamp-2 hover:underline"
-                          >
-                            {item.variant.product.name}
-                          </Link>
+              {items.map((item) => {
+                const isMutating = isItemMutating(item.id);
+                return (
+                  <div key={item.id} className="flex gap-4 group">
+                    <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-[var(--color-bg-muted)] border border-[var(--color-border)]">
+                      {item.variant.images?.[0] ? (
+                        <img src={item.variant.images[0].url} alt={item.variant.product.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-[var(--color-text-tertiary)]">
+                          <ShoppingBag size={20} />
                         </div>
-                        <button
-                          onClick={() => removeItem(item.id)}
-                          disabled={isLoading}
-                          className="text-[var(--color-text-tertiary)] hover:text-red-500 transition-colors shrink-0 pt-1"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                      
-                      {/* Attributes */}
-                      <div className="flex flex-wrap gap-x-2 text-[11px] text-[var(--color-text-secondary)]">
-                        {item.variant.attributes.map(attr => (
-                          <span key={attr.key}>{attr.value}</span>
-                        ))}
-                      </div>
+                      )}
                     </div>
-
-                    <div className="flex items-center justify-between mt-2">
-                      <div className="flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-0.5">
-                        <button
-                          onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                          disabled={isLoading || item.quantity <= 1}
-                          className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-[var(--color-bg-muted)] disabled:opacity-50"
-                        >
-                          <Minus size={12} />
-                        </button>
-                        <span className="w-8 text-center text-xs font-semibold">{item.quantity}</span>
-                        <button
-                          onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                          disabled={isLoading || item.quantity >= (item.variant.inventory?.quantity ?? 0)}
-                          className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-[var(--color-bg-muted)] disabled:opacity-50"
-                        >
-                          <Plus size={12} />
-                        </button>
+                    <div className="flex flex-1 flex-col justify-between py-1">
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-start gap-2">
+                          <div>
+                            {item.variant?.product?.store?.name && (
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-accent)]">
+                                {item.variant.product.store.name}
+                              </p>
+                            )}
+                            <Link 
+                              href={`/product/${item.variant.product.slug}`} 
+                              onClick={() => setIsOpen(false)}
+                              className="text-sm font-semibold text-[var(--color-text-primary)] line-clamp-2 hover:underline"
+                            >
+                              {item.variant.product.name}
+                            </Link>
+                          </div>
+                          <button
+                            onClick={() => removeItem(item.id)}
+                            disabled={isMutating}
+                            className="text-[var(--color-text-tertiary)] hover:text-red-500 transition-colors shrink-0 pt-1 disabled:opacity-40"
+                            title="Remove item"
+                          >
+                            {isMutating ? (
+                              <Loader2 size={16} className="animate-spin text-[var(--color-accent)]" />
+                            ) : (
+                              <Trash2 size={16} />
+                            )}
+                          </button>
+                        </div>
+                        
+                        {/* Attributes */}
+                        <div className="flex flex-wrap gap-x-2 text-[11px] text-[var(--color-text-secondary)]">
+                          {item.variant.attributes.map(attr => (
+                            <span key={attr.key}>{attr.value}</span>
+                          ))}
+                        </div>
                       </div>
-                      <p className="font-bold text-sm text-[var(--color-text-primary)]">
-                        {"\u20B9"}{Number(item.unitPrice).toLocaleString()}
-                      </p>
+
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-0.5">
+                          <button
+                            onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                            disabled={isMutating || item.quantity <= 1}
+                            className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-[var(--color-bg-muted)] disabled:opacity-40"
+                          >
+                            <Minus size={12} />
+                          </button>
+                          <span className="w-8 text-center text-xs font-semibold">{item.quantity}</span>
+                          <button
+                            onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                            disabled={isMutating || item.quantity >= (item.variant.inventory?.quantity ?? 0)}
+                            className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-[var(--color-bg-muted)] disabled:opacity-40"
+                          >
+                            <Plus size={12} />
+                          </button>
+                        </div>
+                        <p className="font-bold text-sm text-[var(--color-text-primary)]">
+                          {"\u20B9"}{Number(item.unitPrice).toLocaleString()}
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

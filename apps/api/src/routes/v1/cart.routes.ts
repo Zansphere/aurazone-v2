@@ -81,110 +81,129 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
     return cart;
   };
 
+  const getEnrichedCart = async (cartId: string) => {
+    const cart = await prisma.cart.findUnique({
+      where: { id: cartId },
+      include: {
+        items: {
+          include: {
+            variant: {
+              include: {
+                product: {
+                  select: {
+                    id: true,
+                    name: true,
+                    slug: true,
+                    isActive: true,
+                    deletedAt: true,
+                    store: { select: { id: true, name: true, slug: true } },
+                  },
+                },
+                images: { take: 1, orderBy: { position: "asc" } },
+                attributes: true,
+                inventory: true,
+              },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        },
+      },
+    });
+
+    if (!cart) {
+      return {
+        items: [],
+        itemCount: 0,
+        totalQuantity: 0,
+        subtotal: 0,
+        hasUnavailableItems: false,
+        canCheckout: false,
+      };
+    }
+
+    // Check for deleted or inactive products/variants and prune them
+    const validItems: typeof cart.items = [];
+    const staleItemIds: string[] = [];
+
+    for (const item of cart.items) {
+      const isDeleted =
+        !item.variant ||
+        item.variant.deletedAt !== null ||
+        !item.variant.product ||
+        item.variant.product.deletedAt !== null;
+      const isInactive = !item.variant?.isAvailable || !item.variant?.product?.isActive;
+
+      if (isDeleted || isInactive) {
+        staleItemIds.push(item.id);
+        try {
+          await releaseInventory(item.variantId, item.quantity, item.id, "Auto-pruned deleted/inactive cart item");
+        } catch {
+          // Ignore release failure for orphaned variants
+        }
+      } else {
+        validItems.push(item);
+      }
+    }
+
+    if (staleItemIds.length > 0) {
+      await prisma.cartItem.deleteMany({
+        where: { id: { in: staleItemIds } },
+      });
+    }
+
+    // Enrich items with live stock availability
+    const enrichedItems = validItems.map((item) => {
+      const availableStock = item.variant?.inventory?.quantity ?? 0;
+      const isStockSufficient = availableStock >= item.quantity;
+      return {
+        ...item,
+        isAvailable: isStockSufficient,
+        availableStock,
+        unavailableReason: !isStockSufficient
+          ? `Only ${availableStock} in stock (requested ${item.quantity})`
+          : null,
+      };
+    });
+
+    const subtotalPaise = enrichedItems
+      .filter((item) => item.isAvailable)
+      .reduce((sum, item) => sum + calcItemSubtotalPaise(item.unitPrice, item.quantity), 0);
+    const subtotal = toRupees(subtotalPaise);
+
+    const uniqueProductIds = new Set(enrichedItems.map((item) => item.productId));
+    const hasUnavailableItems = enrichedItems.some((item) => !item.isAvailable);
+    const canCheckout = enrichedItems.length > 0 && !hasUnavailableItems;
+
+    return {
+      ...cart,
+      items: enrichedItems,
+      itemCount: uniqueProductIds.size,
+      totalQuantity: enrichedItems.reduce((sum, item) => sum + item.quantity, 0),
+      subtotal,
+      hasUnavailableItems,
+      canCheckout,
+    };
+  };
+
   fastify.get("/", async (request, reply) => {
     try {
       const userId = request.user?.userId;
       const rawSessionId = request.headers["x-guest-session"] as string | undefined;
 
       if (!userId && !rawSessionId) {
-        return sendSuccess(reply, { items: [], itemCount: 0, subtotal: 0, hasUnavailableItems: false, canCheckout: false });
-      }
-
-      const activeCart = await getOrCreateActiveCart(request, reply);
-      const cart = await prisma.cart.findUnique({
-        where: { id: activeCart.id },
-        include: {
-          items: {
-            include: {
-              variant: {
-                include: {
-                  product: {
-                    select: {
-                      id: true,
-                      name: true,
-                      slug: true,
-                      isActive: true,
-                      deletedAt: true,
-                      store: { select: { id: true, name: true, slug: true } },
-                    },
-                  },
-                  images: { take: 1, orderBy: { position: "asc" } },
-                  attributes: true,
-                  inventory: true,
-                },
-              },
-            },
-            orderBy: { createdAt: "desc" },
-          },
-        },
-      });
-
-      if (!cart) {
-        return sendSuccess(reply, { items: [], itemCount: 0, subtotal: 0, hasUnavailableItems: false, canCheckout: false });
-      }
-
-      // Check for deleted or inactive products/variants and prune them
-      const validItems: typeof cart.items = [];
-      const staleItemIds: string[] = [];
-
-      for (const item of cart.items) {
-        const isDeleted =
-          !item.variant ||
-          item.variant.deletedAt !== null ||
-          !item.variant.product ||
-          item.variant.product.deletedAt !== null;
-        const isInactive = !item.variant?.isAvailable || !item.variant?.product?.isActive;
-
-        if (isDeleted || isInactive) {
-          staleItemIds.push(item.id);
-          try {
-            await releaseInventory(item.variantId, item.quantity, item.id, "Auto-pruned deleted/inactive cart item");
-          } catch {
-            // Ignore release failure for orphaned variants
-          }
-        } else {
-          validItems.push(item);
-        }
-      }
-
-      if (staleItemIds.length > 0) {
-        await prisma.cartItem.deleteMany({
-          where: { id: { in: staleItemIds } },
+        return sendSuccess(reply, {
+          items: [],
+          itemCount: 0,
+          totalQuantity: 0,
+          subtotal: 0,
+          hasUnavailableItems: false,
+          canCheckout: false,
         });
       }
 
-      // Enrich items with live stock availability
-      const enrichedItems = validItems.map((item) => {
-        const availableStock = item.variant?.inventory?.quantity ?? 0;
-        const isStockSufficient = availableStock >= item.quantity;
-        return {
-          ...item,
-          isAvailable: isStockSufficient,
-          availableStock,
-          unavailableReason: !isStockSufficient
-            ? `Only ${availableStock} in stock (requested ${item.quantity})`
-            : null,
-        };
-      });
-
-      const subtotalPaise = enrichedItems
-        .filter((item) => item.isAvailable)
-        .reduce((sum, item) => sum + calcItemSubtotalPaise(item.unitPrice, item.quantity), 0);
-      const subtotal = toRupees(subtotalPaise);
-
-      const uniqueProductIds = new Set(enrichedItems.map((item) => item.productId));
-      const hasUnavailableItems = enrichedItems.some((item) => !item.isAvailable);
-      const canCheckout = enrichedItems.length > 0 && !hasUnavailableItems;
-
-      return sendSuccess(reply, {
-        ...cart,
-        items: enrichedItems,
-        itemCount: uniqueProductIds.size,
-        totalQuantity: enrichedItems.reduce((sum, item) => sum + item.quantity, 0),
-        subtotal,
-        hasUnavailableItems,
-        canCheckout,
-      });
+      const activeCart = await getOrCreateActiveCart(request, reply);
+      const enriched = await getEnrichedCart(activeCart.id);
+      return sendSuccess(reply, enriched);
     } catch (e: unknown) {
       return handleRouteError(reply, e);
     }
@@ -245,7 +264,8 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
         await holdInventory(parsed.data.variantId, qtyToAdd, newItem.id, `Cart hold for ${cart.id}`);
       }
 
-      return sendSuccess(reply, { message: "Item added to cart" }, 201);
+      const enriched = await getEnrichedCart(cart.id);
+      return sendSuccess(reply, enriched, 201);
     } catch (e: unknown) {
       return handleRouteError(reply, e);
     }
@@ -311,11 +331,13 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
         await releaseInventory(item.variantId, Math.abs(diff), item.id, `Cart release for ${item.cartId}`);
       }
 
-      const updated = await prisma.cartItem.update({
+      await prisma.cartItem.update({
         where: { id: itemId },
         data: { quantity: parsed.data.quantity },
       });
-      return sendSuccess(reply, updated);
+
+      const enriched = await getEnrichedCart(item.cartId);
+      return sendSuccess(reply, enriched);
     } catch (e: unknown) {
       return handleRouteError(reply, e);
     }
@@ -351,7 +373,9 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
       
       await releaseInventory(item.variantId, item.quantity, item.id, `Cart release for ${item.cartId}`);
       await prisma.cartItem.delete({ where: { id: itemId } });
-      return sendSuccess(reply, { message: "Item removed from cart" });
+
+      const enriched = await getEnrichedCart(item.cartId);
+      return sendSuccess(reply, enriched);
     } catch (e: unknown) {
       return handleRouteError(reply, e);
     }
@@ -362,7 +386,15 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
       const userId = request.user?.userId;
       const rawSessionId = request.headers["x-guest-session"] as string | undefined;
       if (!userId && !rawSessionId) {
-        return sendSuccess(reply, { message: "Cart cleared" });
+        return sendSuccess(reply, {
+          items: [],
+          itemCount: 0,
+          totalQuantity: 0,
+          subtotal: 0,
+          hasUnavailableItems: false,
+          canCheckout: false,
+          message: "Cart cleared",
+        });
       }
 
       const activeCart = await getOrCreateActiveCart(request, reply);
@@ -373,7 +405,15 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
         }
         await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
       }
-      return sendSuccess(reply, { message: "Cart cleared" });
+      return sendSuccess(reply, {
+        items: [],
+        itemCount: 0,
+        totalQuantity: 0,
+        subtotal: 0,
+        hasUnavailableItems: false,
+        canCheckout: false,
+        message: "Cart cleared",
+      });
     } catch (e: unknown) {
       return handleRouteError(reply, e);
     }

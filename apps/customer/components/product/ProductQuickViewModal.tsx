@@ -3,11 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { X, Check, ShoppingCart, Star, Heart, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Check, ShoppingCart, Star, Heart, ExternalLink, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { useCartStore } from "@/stores/cart.store";
 import { useAuthStore } from "@/stores/auth.store";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { useWishlistStore } from "@/stores/wishlist.store";
 
 interface ProductQuickViewProps {
   product: any;
@@ -17,30 +16,15 @@ interface ProductQuickViewProps {
 
 export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuickViewProps) {
   const router = useRouter();
-  const queryClient = useQueryClient();
-  const { addToCart, isLoading: cartLoading } = useCartStore();
+  const { addToCart, isVariantAdding } = useCartStore();
   const { isAuthenticated } = useAuthStore();
+  const hasWishlistItem = useWishlistStore((s) => s.hasItem);
+  const toggleWishlist = useWishlistStore((s) => s.toggle);
 
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [addedToCart, setAddedToCart] = useState(false);
-
-  const { data: wishlistData } = useQuery({
-    queryKey: ["wishlist"],
-    queryFn: () => api.get<any[]>("/wishlist"),
-    enabled: isAuthenticated && isOpen,
-  });
-
-  const addWishlistMutation = useMutation({
-    mutationFn: (body: { productId: string; variantId?: string }) => api.post("/wishlist", body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["wishlist"] }),
-  });
-
-  const removeWishlistMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/wishlist/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["wishlist"] }),
-  });
 
   if (!isOpen || !product) return null;
 
@@ -54,23 +38,28 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
   const stock = isAvailable ? (variant?.inventory?.quantity ?? 10) : 0;
   const attributes = variant?.attributes ?? [];
 
-  const wishlistItems: any[] = wishlistData?.data ?? [];
-  const wishlistItem = wishlistItems.find((w) => w.productId === product.id);
-  const isWishlisted = !!wishlistItem;
+  const isWishlisted = product?.id ? hasWishlistItem(product.id) : false;
+  const isAdding = variant?.id ? isVariantAdding(variant.id) : false;
 
   const handleWishlistToggle = () => {
     if (!isAuthenticated) {
       router.push("/login");
       return;
     }
-    if (isWishlisted) removeWishlistMutation.mutate(wishlistItem.id);
-    else addWishlistMutation.mutate({ productId: product.id, variantId: variant?.id });
+    toggleWishlist(product.id, variant?.id);
   };
 
   const handleAddToCart = async () => {
     if (!variant) return;
     try {
-      await addToCart(variant.id, quantity);
+      const preview = {
+        productName: product.name,
+        productSlug: product.slug,
+        variantName: variant.attributes?.map((a: any) => a.value).join(" / ") || variant.sku,
+        imageUrl: images[0]?.url,
+        price,
+      };
+      await addToCart(variant.id, quantity, preview);
       setAddedToCart(true);
       setTimeout(() => setAddedToCart(false), 2000);
     } catch {
@@ -264,7 +253,7 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
 
                 <button
                   onClick={handleAddToCart}
-                  disabled={stock === 0 || cartLoading}
+                  disabled={stock === 0 || isAdding}
                   className={`flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-semibold transition-all ${
                     addedToCart
                       ? "bg-emerald-500 text-white"
@@ -275,9 +264,13 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
                     <>
                       <Check size={14} /> Added to Cart
                     </>
+                  ) : isAdding ? (
+                    <>
+                      <Loader2 className="animate-spin" size={14} /> Adding...
+                    </>
                   ) : (
                     <>
-                      <ShoppingCart size={14} /> {cartLoading ? "Adding..." : "Add to Cart"}
+                      <ShoppingCart size={14} /> Add to Cart
                     </>
                   )}
                 </button>

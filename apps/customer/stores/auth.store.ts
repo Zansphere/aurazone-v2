@@ -2,6 +2,7 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
 import { useCartStore } from "./cart.store";
+import { useWishlistStore } from "./wishlist.store";
 
 interface User {
   id: string;
@@ -32,6 +33,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user: res.data.user, isAuthenticated: true });
       localStorage.removeItem("guest_session_id");
       useCartStore.getState().fetchCart();
+      useWishlistStore.getState().fetchWishlist();
     }
   },
 
@@ -41,6 +43,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user: res.data.user, isAuthenticated: true });
       localStorage.removeItem("guest_session_id");
       useCartStore.getState().fetchCart();
+      useWishlistStore.getState().fetchWishlist();
     }
   },
 
@@ -48,6 +51,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     await api.post("/auth/logout");
     set({ user: null, isAuthenticated: false });
     useCartStore.getState().fetchCart();
+    useWishlistStore.getState().clearWishlist();
   },
 
   fetchUser: async () => {
@@ -55,6 +59,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const res = await api.get<{ user: User }>("/auth/me");
       if (res.data) {
         set({ user: res.data.user, isAuthenticated: true, isLoading: false });
+        useWishlistStore.getState().fetchWishlist();
       } else {
         set({ user: null, isAuthenticated: false, isLoading: false });
       }

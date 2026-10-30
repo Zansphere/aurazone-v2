@@ -47,7 +47,7 @@ export default function OrderDetailPage() {
     try {
       for (const item of order.items) {
         if (item.variantId) {
-          await addToCart(item.variantId, item.quantity || 1);
+          await addToCart(item.variantId, item.quantity || 1, undefined, false);
         }
       }
       router.push("/cart");

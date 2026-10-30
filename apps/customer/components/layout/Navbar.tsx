@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { Search, ShoppingCart, Heart, User, Menu, X, ChevronRight, LogOut, Package } from "lucide-react";
 import { useAuthStore } from "@/stores/auth.store";
 import { useCartStore } from "@/stores/cart.store";
+import { useWishlistStore } from "@/stores/wishlist.store";
 import { useRouter } from "next/navigation";
 
 import { useQuery } from "@tanstack/react-query";
@@ -54,6 +55,7 @@ export function Navbar() {
   const cartCount = new Set(
     cart?.items?.map((item) => item.productId || (item as any).variant?.product?.id || item.variantId)
   ).size;
+  const wishlistCount = useWishlistStore((s) => s.items.length);
 
   // Close user menu on outside click
   useEffect(() => {
@@ -135,8 +137,17 @@ export function Navbar() {
           >
             <Search size={18} />
           </button>
-          <Link href="/wishlist" className="hidden md:flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors">
+          <Link
+            href="/wishlist"
+            className="relative hidden md:flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors"
+            title="Wishlist"
+          >
             <Heart size={18} />
+            {wishlistCount > 0 && (
+              <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
+                {wishlistCount > 9 ? "9+" : wishlistCount}
+              </span>
+            )}
           </Link>
           <button onClick={() => useCartStore.getState().setIsOpen(true)} className="relative flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors">
             <ShoppingCart size={18} />

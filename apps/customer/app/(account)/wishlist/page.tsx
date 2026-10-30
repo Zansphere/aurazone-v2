@@ -1,34 +1,62 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
-import { Heart, Trash2, ShoppingCart, Package } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useWishlistStore } from "@/stores/wishlist.store";
+import { useCartStore } from "@/stores/cart.store";
+import { Heart, Trash2, ShoppingCart, Package, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { AuthGate } from "@/components/providers/AuthGate";
 
 export default function WishlistPage() {
-  const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery({
-    queryKey: ["wishlist"],
-    queryFn: () => api.get<any[]>("/wishlist"),
-  });
+  const { items, isLoading, isInitialized, fetchWishlist, removeItem } = useWishlistStore();
+  const { addToCart } = useCartStore();
+  const [movingItemIds, setMovingItemIds] = useState<Record<string, boolean>>({});
+  const [removingItemIds, setRemovingItemIds] = useState<Record<string, boolean>>({});
 
-  const removeMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/wishlist/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["wishlist"] }),
-  });
+  useEffect(() => {
+    fetchWishlist();
+  }, [fetchWishlist]);
 
-  const moveToCartMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/wishlist/${id}/move-to-cart`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["wishlist"] });
-      queryClient.invalidateQueries({ queryKey: ["cart"] });
-    },
-  });
+  const handleRemove = async (item: any) => {
+    setRemovingItemIds((prev) => ({ ...prev, [item.id]: true }));
+    try {
+      await removeItem(item.id, item.productId || item.product?.id);
+    } finally {
+      setRemovingItemIds((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+    }
+  };
 
-  const items = data?.data ?? [];
+  const handleMoveToCart = async (item: any) => {
+    setMovingItemIds((prev) => ({ ...prev, [item.id]: true }));
+    try {
+      const product = item.product;
+      const variant = product?.variants?.[0];
+      if (variant) {
+        const preview = {
+          productName: product?.name ?? "Product",
+          productSlug: product?.slug ?? "",
+          imageUrl: variant?.images?.[0]?.url,
+          price: Number(variant?.price || 0),
+        };
+        // Optimistically remove from wishlist (0ms)
+        removeItem(item.id, item.productId || product?.id);
+        // Optimistically add to cart & open cart drawer
+        await addToCart(variant.id, 1, preview, true);
+      }
+    } finally {
+      setMovingItemIds((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+    }
+  };
 
-  if (isLoading) {
+  if (isLoading && !isInitialized && items.length === 0) {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -70,8 +98,8 @@ export default function WishlistPage() {
           const product = item.product;
           const variant = product?.variants?.[0];
           const imageUrl = variant?.images?.[0]?.url;
-          const isRemoving = removeMutation.isPending;
-          const isMoving = moveToCartMutation.isPending;
+          const isRemoving = removingItemIds[item.id];
+          const isMoving = movingItemIds[item.id];
 
           return (
             <div
@@ -93,12 +121,16 @@ export default function WishlistPage() {
                 )}
                 {/* Remove button */}
                 <button
-                  onClick={() => removeMutation.mutate(item.id)}
+                  onClick={() => handleRemove(item)}
                   disabled={isRemoving}
-                  className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-[var(--color-text-secondary)] shadow-sm backdrop-blur-sm transition-all hover:bg-red-50 hover:text-[var(--color-danger)] opacity-0 group-hover:opacity-100"
+                  className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-[var(--color-text-secondary)] shadow-sm backdrop-blur-sm transition-all hover:bg-red-50 hover:text-[var(--color-danger)] opacity-0 group-hover:opacity-100 disabled:opacity-50"
                   title="Remove"
                 >
-                  <Trash2 size={14} />
+                  {isRemoving ? (
+                    <Loader2 size={14} className="animate-spin text-red-500" />
+                  ) : (
+                    <Trash2 size={14} />
+                  )}
                 </button>
               </div>
 
@@ -131,12 +163,16 @@ export default function WishlistPage() {
                 </div>
 
                 <button
-                  onClick={() => moveToCartMutation.mutate(item.id)}
+                  onClick={() => handleMoveToCart(item)}
                   disabled={isMoving}
                   className="mt-3 flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-primary)] px-4 py-2.5 text-xs font-semibold text-white transition-all hover:bg-[var(--color-primary-hover)] hover:shadow-[var(--shadow-md)] disabled:opacity-50 active:scale-[0.98]"
                 >
-                  <ShoppingCart size={13} />
-                  {isMoving ? "Moving..." : "Add to Cart"}
+                  {isMoving ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <ShoppingCart size={13} />
+                  )}
+                  {isMoving ? "Moving to Cart..." : "Add to Cart"}
                 </button>
               </div>
             </div>

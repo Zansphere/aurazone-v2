@@ -1,16 +1,32 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
-import { Minus, Plus, Trash2, ShoppingCart, ArrowRight, Bookmark, Tag, Check, Sparkles, X } from "lucide-react";
+import { Minus, Plus, Trash2, ShoppingCart, ArrowRight, Bookmark, Tag, Check, Sparkles, X, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useAuthStore } from "@/stores/auth.store";
+import { useCartStore } from "@/stores/cart.store";
+import { useWishlistStore } from "@/stores/wishlist.store";
 import { useCouponStore } from "@/stores/coupon.store";
 
 export default function CartPage() {
-  const queryClient = useQueryClient();
   const { isAuthenticated } = useAuthStore();
+  const {
+    cart,
+    isLoading: cartLoading,
+    fetchCart,
+    updateQuantity,
+    removeItem,
+    addToCart,
+    isItemMutating,
+  } = useCartStore();
+
+  const {
+    items: savedItems,
+    removeItem: removeWishlistItem,
+    toggle: toggleWishlist,
+    fetchWishlist,
+  } = useWishlistStore();
+
   const {
     appliedCoupon,
     applyCoupon,
@@ -24,62 +40,18 @@ export default function CartPage() {
 
   const [couponCode, setCouponCode] = useState("");
   const [localCouponError, setLocalCouponError] = useState("");
+  const [savingItemIds, setSavingItemIds] = useState<Record<string, boolean>>({});
+  const [movingItemIds, setMovingItemIds] = useState<Record<string, boolean>>({});
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["cart"],
-    queryFn: () => api.get<any>("/cart"),
-  });
+  useEffect(() => {
+    fetchCart();
+    fetchWishlist();
+  }, [fetchCart, fetchWishlist]);
 
-  const { data: wishlistData } = useQuery({
-    queryKey: ["wishlist"],
-    queryFn: () => api.get<any[]>("/wishlist"),
-    enabled: isAuthenticated,
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ itemId, quantity }: { itemId: string; quantity: number }) =>
-      api.patch(`/cart/${itemId}`, { quantity }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["cart"] }),
-  });
-
-  const removeMutation = useMutation({
-    mutationFn: (itemId: string) => api.delete(`/cart/${itemId}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["cart"] }),
-  });
-
-  const saveForLaterMutation = useMutation({
-    mutationFn: async (item: any) => {
-      if (isAuthenticated) {
-        await api.post("/wishlist", {
-          productId: item.productId || item.variant?.productId,
-          variantId: item.variantId,
-        });
-      }
-      await api.delete(`/cart/${item.id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["cart"] });
-      queryClient.invalidateQueries({ queryKey: ["wishlist"] });
-    },
-  });
-
-  const moveToCartMutation = useMutation({
-    mutationFn: async (item: any) => {
-      await api.post("/cart", { variantId: item.variantId, quantity: 1 });
-      await api.delete(`/wishlist/${item.id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["cart"] });
-      queryClient.invalidateQueries({ queryKey: ["wishlist"] });
-    },
-  });
-
-  const cart = data?.data;
   const items = cart?.items ?? [];
-  const subtotal = cart?.subtotal ?? 0;
-  const itemCount = cart?.itemCount ?? 0;
+  const subtotal = Number(cart?.subtotal ?? 0);
+  const itemCount = Number(cart?.itemCount ?? 0);
   const hasUnavailableItems = Boolean(cart?.hasUnavailableItems || items.some((it: any) => it.isAvailable === false || it.unavailableReason || !it.variant?.product?.name));
-  const savedItems: any[] = wishlistData?.data ?? [];
 
   const cartItemInputs = items.map((it: any) => ({
     productId: it.variant?.product?.id || it.productId,
@@ -105,6 +77,48 @@ export default function CartPage() {
     }
   };
 
+  const handleSaveForLater = async (item: any) => {
+    setSavingItemIds((prev) => ({ ...prev, [item.id]: true }));
+    try {
+      const prodId = item.productId || item.variant?.productId || item.variant?.product?.id;
+      if (prodId && isAuthenticated) {
+        toggleWishlist(prodId, item.variantId);
+      }
+      await removeItem(item.id);
+    } finally {
+      setSavingItemIds((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+    }
+  };
+
+  const handleMoveToCart = async (wish: any) => {
+    setMovingItemIds((prev) => ({ ...prev, [wish.id]: true }));
+    try {
+      const variant = wish.variant || wish.product?.variants?.[0];
+      const variantId = wish.variantId || variant?.id;
+      if (!variantId) return;
+
+      const preview = {
+        productName: wish.product?.name ?? "Product",
+        productSlug: wish.product?.slug ?? "",
+        imageUrl: variant?.images?.[0]?.url,
+        price: Number(variant?.price || 0),
+      };
+
+      await addToCart(variantId, 1, preview, false);
+      await removeWishlistItem(wish.id);
+    } finally {
+      setMovingItemIds((prev) => {
+        const next = { ...prev };
+        delete next[wish.id];
+        return next;
+      });
+    }
+  };
+
   const discountAmount = calculateDiscount(subtotal, cartItemInputs);
   const discountedSubtotal = Math.max(0, subtotal - discountAmount);
   const deliveryFee = discountedSubtotal >= 499 ? 0 : 49;
@@ -112,7 +126,7 @@ export default function CartPage() {
   // Standard 18% GST included in the products price: Base = Subtotal / 1.18, GST = Subtotal * 18 / 118
   const estimatedGst = Math.round((discountedSubtotal * 18) / 118);
 
-  if (isLoading) {
+  if (cartLoading && !cart) {
     return (
       <div className="section-container py-8">
         <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-6">Shopping Cart</h1>
@@ -233,8 +247,9 @@ export default function CartPage() {
                     <div className="flex items-center justify-between mt-3 pt-2 border-t border-[var(--color-border)]/60">
                       <div className="flex items-center rounded-lg border border-[var(--color-border)] overflow-hidden bg-[var(--color-bg-base)]">
                         <button
-                          onClick={() => updateMutation.mutate({ itemId: item.id, quantity: Math.max(1, item.quantity - 1) })}
-                          className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors"
+                          onClick={() => updateQuantity(item.id, Math.max(1, item.quantity - 1))}
+                          disabled={isItemMutating(item.id) || item.quantity <= 1}
+                          className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors disabled:opacity-40"
                         >
                           <Minus size={12} />
                         </button>
@@ -242,8 +257,9 @@ export default function CartPage() {
                           {item.quantity}
                         </span>
                         <button
-                          onClick={() => updateMutation.mutate({ itemId: item.id, quantity: item.quantity + 1 })}
-                          className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors"
+                          onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                          disabled={isItemMutating(item.id) || item.quantity >= (item.variant?.inventory?.quantity ?? 999)}
+                          className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] transition-colors disabled:opacity-40"
                         >
                           <Plus size={12} />
                         </button>
@@ -251,19 +267,28 @@ export default function CartPage() {
 
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => saveForLaterMutation.mutate(item)}
-                          disabled={saveForLaterMutation.isPending}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-accent)] transition-colors"
+                          onClick={() => handleSaveForLater(item)}
+                          disabled={isItemMutating(item.id) || savingItemIds[item.id]}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-40"
                         >
-                          <Bookmark size={13} />
+                          {savingItemIds[item.id] ? (
+                            <Loader2 size={13} className="animate-spin" />
+                          ) : (
+                            <Bookmark size={13} />
+                          )}
                           Save for later
                         </button>
                         <button
-                          onClick={() => removeMutation.mutate(item.id)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:bg-red-50 hover:text-red-500 transition-colors"
+                          onClick={() => removeItem(item.id)}
+                          disabled={isItemMutating(item.id)}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:bg-red-50 hover:text-red-500 transition-colors disabled:opacity-40"
                           title="Remove item"
                         >
-                          <Trash2 size={14} />
+                          {isItemMutating(item.id) ? (
+                            <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />
+                          ) : (
+                            <Trash2 size={14} />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -284,6 +309,7 @@ export default function CartPage() {
                   const product = wish.product;
                   const variant = wish.variant || product?.variants?.[0];
                   const img = variant?.images?.[0]?.url;
+                  const isMovingThis = movingItemIds[wish.id];
                   return (
                     <div key={wish.id} className="flex gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-3 items-center">
                       <div className="h-16 w-16 rounded-lg bg-[var(--color-bg-muted)] overflow-hidden shrink-0">
@@ -294,10 +320,12 @@ export default function CartPage() {
                         <p className="text-xs font-bold text-[var(--color-accent)] mt-0.5">₹{Number(variant?.price || 0).toLocaleString()}</p>
                         <div className="mt-2 flex gap-2">
                           <button
-                            onClick={() => moveToCartMutation.mutate(wish)}
-                            className="text-[11px] font-semibold text-white bg-[var(--color-primary)] px-2.5 py-1 rounded-md hover:bg-[var(--color-primary-hover)] transition-colors"
+                            onClick={() => handleMoveToCart(wish)}
+                            disabled={isMovingThis}
+                            className="text-[11px] font-semibold text-white bg-[var(--color-primary)] px-2.5 py-1 rounded-md hover:bg-[var(--color-primary-hover)] transition-colors disabled:opacity-50 inline-flex items-center gap-1"
                           >
-                            Move to Cart
+                            {isMovingThis && <Loader2 size={11} className="animate-spin" />}
+                            {isMovingThis ? "Moving..." : "Move to Cart"}
                           </button>
                         </div>
                       </div>

@@ -1,4 +1,6 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
+import { ZodError } from "zod";
+import jwt from "jsonwebtoken";
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -27,22 +29,48 @@ const PRISMA_ERROR_MAP: Record<string, { message: string; status: number }> = {
 /**
  * Sanitizes an error before it reaches the client.
  * - Business errors (errors with explicit statusCode) pass through unchanged.
+ * - Zod validation errors return clean 400 with the specific issue.
+ * - JWT auth errors return clean 401.
+ * - Fastify bad request errors (like JSON parse errors) return 400.
  * - Prisma errors are mapped to safe, generic messages.
  * - Unknown 500-level errors are replaced with a generic message.
  */
 export function sanitizeError(err: unknown): { message: string; statusCode: number } {
+  if (!err) {
+    return { message: "An unexpected error occurred", statusCode: 500 };
+  }
+
+  // Zod validation errors
+  if (err instanceof ZodError) {
+    const firstIssue = err.errors[0];
+    const field = firstIssue?.path?.length ? `${firstIssue.path.join(".")}: ` : "";
+    const message = firstIssue ? `${field}${firstIssue.message}` : "Validation error";
+    return { message, statusCode: 400 };
+  }
+
+  // JWT errors
+  if (err instanceof jwt.TokenExpiredError) {
+    return { message: "Token expired", statusCode: 401 };
+  }
+  if (err instanceof jwt.JsonWebTokenError) {
+    return { message: "Invalid token", statusCode: 401 };
+  }
+
   const error = err as Error & { statusCode?: number; code?: string; meta?: any };
 
   // Business errors thrown with Object.assign(new Error(...), { statusCode })
-  // are trusted — the message was crafted by our own service code.
-  if (error.statusCode && error.statusCode < 500) {
-    return { message: error.message, statusCode: error.statusCode };
+  if (typeof error.statusCode === "number" && error.statusCode >= 400 && error.statusCode < 500) {
+    return { message: error.message || "Bad request", statusCode: error.statusCode };
+  }
+
+  // Fastify body parse errors (e.g. FST_ERR_CTP_INVALID_MEDIA_TYPE, SyntaxError in JSON body)
+  if (error.name === "SyntaxError" || error.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
+    return { message: error.message || "Invalid request body", statusCode: 400 };
   }
 
   // Prisma client known errors (PrismaClientKnownRequestError)
   if (error.code && PRISMA_ERROR_MAP[error.code]) {
     const mapped = PRISMA_ERROR_MAP[error.code];
-    // Log the full Prisma error server-side for debugging
     console.error(`[PRISMA ${error.code}]`, error.message, error.meta ?? "");
     return { message: mapped.message, statusCode: mapped.status };
   }
@@ -101,14 +129,15 @@ export function sendPaginated<T>(
   page: number,
   limit: number
 ): void {
+  const safeLimit = Math.max(1, limit);
   reply.status(200).send({
     success: true,
     data,
     meta: {
       page,
-      limit,
+      limit: safeLimit,
       total,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / safeLimit) || 1,
     },
   } satisfies ApiResponse<T[]>);
 }
@@ -125,4 +154,4 @@ export function globalErrorHandler(
     message,
     error: message,
   } satisfies ApiResponse);
-}
+}

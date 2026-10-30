@@ -46,11 +46,12 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
 
   const variants = product.variants ?? [];
   const variant = variants[selectedVariantIdx] ?? variants[0];
+  const isAvailable = product.isActive !== false && variant && variant.isAvailable !== false && !variant.deletedAt;
   const images = variant?.images ?? [];
   const price = Number(variant?.price ?? 0);
   const comparePrice = variant?.compareAtPrice ? Number(variant.compareAtPrice) : null;
   const discount = comparePrice ? Math.round(((comparePrice - price) / comparePrice) * 100) : 0;
-  const stock = variant?.inventory?.quantity ?? 10;
+  const stock = isAvailable ? (variant?.inventory?.quantity ?? 10) : 0;
   const attributes = variant?.attributes ?? [];
 
   const wishlistItems: any[] = wishlistData?.data ?? [];
@@ -223,12 +224,12 @@ export function ProductQuickViewModal({ product, isOpen, onClose }: ProductQuick
 
               {/* Stock status */}
               <div className="text-xs">
-                {stock > 0 ? (
+                {isAvailable && stock > 0 ? (
                   <span className="text-emerald-600 font-medium flex items-center gap-1">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> In Stock
                   </span>
                 ) : (
-                  <span className="text-red-500 font-medium">Out of Stock</span>
+                  <span className="text-red-500 font-medium">{!isAvailable ? "Currently Unavailable" : "Out of Stock"}</span>
                 )}
               </div>
 

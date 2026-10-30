@@ -78,6 +78,7 @@ export default function CartPage() {
   const items = cart?.items ?? [];
   const subtotal = cart?.subtotal ?? 0;
   const itemCount = cart?.itemCount ?? 0;
+  const hasUnavailableItems = Boolean(cart?.hasUnavailableItems || items.some((it: any) => it.isAvailable === false || it.unavailableReason || !it.variant?.product?.name));
   const savedItems: any[] = wishlistData?.data ?? [];
 
   const cartItemInputs = items.map((it: any) => ({
@@ -168,6 +169,17 @@ export default function CartPage() {
         Shopping Cart <span className="text-base font-normal text-[var(--color-text-tertiary)]">({itemCount} items)</span>
       </h1>
 
+      {hasUnavailableItems && (
+        <div className="mb-6 rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-900 shadow-sm flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">⚠️</span>
+            <p className="font-medium text-xs sm:text-sm">
+              Some items in your cart are no longer available or out of stock. Please remove them to proceed to checkout.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Cart Items */}
         <div className="lg:col-span-2 space-y-6">
@@ -177,9 +189,10 @@ export default function CartPage() {
               const productName = item.variant?.product?.name ?? "Product";
               const storeName = item.variant?.product?.store?.name;
               const unitPrice = Number(item.unitPrice);
+              const isItemUnavailable = item.isAvailable === false || Boolean(item.unavailableReason) || !item.variant?.product?.name;
 
               return (
-                <div key={item.id} className="flex gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-4 transition-shadow hover:shadow-sm">
+                <div key={item.id} className={`flex gap-4 rounded-xl border p-4 transition-shadow hover:shadow-sm ${isItemUnavailable ? "border-rose-300 bg-rose-50/40" : "border-[var(--color-border)] bg-[var(--color-bg-surface)]"}`}>
                   {/* Image */}
                   <div className="h-20 w-20 shrink-0 rounded-lg bg-[var(--color-bg-muted)] overflow-hidden">
                     {imageUrl ? (
@@ -208,6 +221,13 @@ export default function CartPage() {
                       <p className="text-[10px] text-[var(--color-text-secondary)] mt-0.5">
                         {item.variant.attributes.map((a: any) => `${a.key}: ${a.value}`).join(" · ")}
                       </p>
+                    )}
+
+                    {isItemUnavailable && (
+                      <div className="mt-2 text-xs font-semibold text-rose-700 bg-rose-100/70 border border-rose-200 px-2.5 py-1 rounded-md inline-flex items-center gap-1.5">
+                        <span>⚠️</span>
+                        <span>{item.unavailableReason || "Product is no longer available"}</span>
+                      </div>
                     )}
 
                     <div className="flex items-center justify-between mt-3 pt-2 border-t border-[var(--color-border)]/60">
@@ -373,12 +393,27 @@ export default function CartPage() {
               </p>
             )}
 
-            <Link
-              href="/checkout"
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--color-primary)] py-3.5 text-sm font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-all shadow-md active:scale-[0.99]"
-            >
-              Proceed to Checkout <ArrowRight size={16} />
-            </Link>
+            {hasUnavailableItems ? (
+              <div className="mt-5 space-y-2">
+                <button
+                  type="button"
+                  disabled
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-gray-400 py-3.5 text-sm font-semibold text-white cursor-not-allowed opacity-80"
+                >
+                  Remove unavailable items to checkout
+                </button>
+                <p className="text-[11px] text-center text-rose-600 font-medium">
+                  Please remove unavailable items from your cart before proceeding.
+                </p>
+              </div>
+            ) : (
+              <Link
+                href="/checkout"
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--color-primary)] py-3.5 text-sm font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-all shadow-md active:scale-[0.99]"
+              >
+                Proceed to Checkout <ArrowRight size={16} />
+              </Link>
+            )}
           </div>
         </div>
       </div>

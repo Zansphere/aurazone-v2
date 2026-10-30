@@ -32,6 +32,50 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
 
     const amountInPaise = toPaise(order.totalAmount);
 
+    if (amountInPaise <= 0) {
+      // Free order (e.g. 100% coupon) - Auto-complete order immediately
+      const trackingToken = order.trackingToken || crypto.randomBytes(16).toString("hex");
+      await prisma.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: {
+            status: "RECEIVED",
+            paymentStatus: "SUCCESS",
+            trackingToken,
+          },
+        });
+        await tx.payment.create({
+          data: {
+            orderId: order.id,
+            gateway: "RAZORPAY",
+            gatewayOrderId: `free_${order.orderNumber}`,
+            amount: 0,
+            status: "SUCCESS",
+            paidAt: new Date(),
+          },
+        });
+        await tx.orderLog.create({
+          data: {
+            orderId: order.id,
+            orderNumberSnapshot: order.orderNumber,
+            action: "STATUS_TRANSITION",
+            fromStatus: "PENDING",
+            toStatus: "RECEIVED",
+            note: "Order confirmed automatically (100% discount / free order)",
+          },
+        });
+      });
+
+      return sendSuccess(reply, {
+        razorpayOrderId: null,
+        amount: 0,
+        currency: "INR",
+        isFreeOrder: true,
+        trackingToken,
+        orderNumber: order.orderNumber,
+      });
+    }
+
     // Idempotency: if an active PENDING payment already exists for this order, reuse it
     const existingPayment = await prisma.payment.findFirst({
       where: { orderId: order.id, gateway: "RAZORPAY", status: "PENDING" },
@@ -106,11 +150,20 @@ const paymentRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── Client-side signature verification ─────────────────────────────────────
   fastify.post("/verify", { preHandler: [optionalAuth] }, async (request, reply) => {
     const { razorpayOrderId, razorpayPaymentId, razorpaySignature } =
-      request.body as {
-        razorpayOrderId: string;
-        razorpayPaymentId: string;
-        razorpaySignature: string;
-      };
+      (request.body as {
+        razorpayOrderId?: string;
+        razorpayPaymentId?: string;
+        razorpaySignature?: string;
+      }) || {};
+
+    if (razorpayOrderId?.startsWith("free_")) {
+      const payment = await prisma.payment.findFirst({
+        where: { gatewayOrderId: razorpayOrderId },
+      });
+      if (payment) {
+        return sendSuccess(reply, { message: "Free order confirmed", orderId: payment.orderId });
+      }
+    }
 
     if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
       return sendError(reply, "Missing payment verification fields", 400);

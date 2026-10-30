@@ -34,13 +34,44 @@ export const resetPasswordSchema = z.object({
 
 // ─── Address ──────────────────────────────────────────────────────────────────
 export const addressSchema = z.object({
-  name: z.string().min(1, "Label is required"),
-  phone: z.string().regex(/^\+?[1-9]\d{9,14}$/, "Invalid phone number"),
-  addressLine1: z.string().min(5, "Address is required"),
-  addressLine2: z.string().optional(),
-  city: z.string().min(1, "City is required"),
-  state: z.string().min(1, "State is required"),
-  postalCode: z.string().min(4, "Postal code is required"),
+  name: z
+    .string()
+    .trim()
+    .min(2, "Name must be at least 2 characters")
+    .max(70, "Name cannot exceed 70 characters")
+    .regex(/^[a-zA-Z\s.'-]+$/, "Name should contain letters only"),
+  phone: z
+    .string()
+    .trim()
+    .regex(/^(?:\+91[\-\s]?)?[6-9]\d{9}$|^\+?[1-9]\d{9,14}$/, "Please enter a valid 10-digit mobile number")
+    .max(15, "Phone number cannot exceed 15 digits"),
+  addressLine1: z
+    .string()
+    .trim()
+    .min(5, "Address must be at least 5 characters")
+    .max(120, "Address cannot exceed 120 characters"),
+  addressLine2: z
+    .string()
+    .trim()
+    .max(120, "Address line 2 cannot exceed 120 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  city: z
+    .string()
+    .trim()
+    .min(2, "City must be at least 2 characters")
+    .max(50, "City cannot exceed 50 characters")
+    .regex(/^[a-zA-Z\s.-]+$/, "City should contain letters only"),
+  state: z
+    .string()
+    .trim()
+    .min(2, "State must be at least 2 characters")
+    .max(50, "State cannot exceed 50 characters"),
+  postalCode: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "Postal code must be a valid 6-digit PIN code"),
   country: z.string().default("IN"),
   isDefault: z.boolean().default(false),
 });

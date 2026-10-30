@@ -223,7 +223,8 @@ export default function ProductDetailPage() {
   const price = Number(variant?.price ?? 0);
   const comparePrice = variant?.compareAtPrice ? Number(variant.compareAtPrice) : null;
   const discount = comparePrice ? Math.round(((comparePrice - price) / comparePrice) * 100) : 0;
-  const stock = variant?.inventory?.quantity ?? 10;
+  const isAvailable = (product as any)?.isActive !== false && variant && (variant as any).isAvailable !== false && !(variant as any).deletedAt;
+  const stock = isAvailable ? (variant?.inventory?.quantity ?? 10) : 0;
   const attributes = variant?.attributes ?? [];
   const avgRating =
     reviews.length > 0 ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0;
@@ -694,13 +695,15 @@ export default function ProductDetailPage() {
 
           {/* Stock Availability */}
           <div className="text-sm">
-            {stock > 0 ? (
+            {isAvailable && stock > 0 ? (
               <span className="text-emerald-600 font-semibold flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                 In Stock & Ready to Ship
               </span>
             ) : (
-              <span className="text-red-500 font-semibold">✕ Out of Stock</span>
+              <span className="text-red-500 font-semibold">
+                ✕ {!isAvailable ? "Currently Unavailable" : "Out of Stock"}
+              </span>
             )}
           </div>
 

@@ -638,10 +638,61 @@ export async function deleteProduct(id: string, adminId?: string, redis?: Redis 
   });
   if (!product) throw Object.assign(new Error("Product not found"), { statusCode: 404 });
 
-  // Soft delete — mark as deleted
-  await prisma.product.update({
-    where: { id },
-    data: { deletedAt: new Date(), deletedBy: adminId ?? null, isActive: false },
+  const now = new Date();
+
+  // Atomically soft-delete product, variants, release reservations, and purge from active carts
+  await prisma.$transaction(async (tx) => {
+    // 1. Soft delete product
+    await tx.product.update({
+      where: { id },
+      data: { deletedAt: now, deletedBy: adminId ?? null, isActive: false },
+    });
+
+    // 2. Soft delete and disable all product variants
+    await tx.productVariant.updateMany({
+      where: { productId: id },
+      data: { deletedAt: now, deletedBy: adminId ?? null, isAvailable: false },
+    });
+
+    // 3. Find active cart items for this product
+    const activeCartItems = await tx.cartItem.findMany({
+      where: {
+        productId: id,
+        cart: { status: "ACTIVE" },
+      },
+      select: { id: true, variantId: true, quantity: true },
+    });
+
+    // 4. Release inventory reservations for active cart items
+    for (const ci of activeCartItems) {
+      const res = await tx.inventoryReservation.findUnique({ where: { cartItemId: ci.id } });
+      if (res && res.status === "ACTIVE") {
+        await tx.$queryRaw`
+          UPDATE "Inventory"
+          SET reserved = GREATEST(reserved - ${res.quantity}, 0)
+          WHERE variant_id = ${ci.variantId}
+        `;
+        await tx.inventoryReservation.update({
+          where: { id: res.id },
+          data: { status: "RELEASED", quantity: 0 },
+        });
+      }
+    }
+
+    // 5. Remove deleted product items from active carts so they don't linger
+    if (activeCartItems.length > 0) {
+      await tx.cartItem.deleteMany({
+        where: {
+          productId: id,
+          cart: { status: "ACTIVE" },
+        },
+      });
+    }
+
+    // 6. Clean up wishlist items for this product
+    await tx.wishlistItem.deleteMany({
+      where: { productId: id },
+    });
   });
 
   if (adminId) {
@@ -703,8 +754,8 @@ export async function getProductReviews(slug: string) {
 }
 
 export async function addProductReview(slug: string, userId: string, data: { rating: number; body?: string }) {
-  if (data.rating < 1 || data.rating > 5) {
-    throw Object.assign(new Error("Rating must be between 1 and 5"), { statusCode: 400 });
+  if (!data || typeof data.rating !== "number" || isNaN(data.rating) || data.rating < 1 || data.rating > 5 || !Number.isInteger(data.rating)) {
+    throw Object.assign(new Error("Rating must be an integer between 1 and 5"), { statusCode: 400 });
   }
 
   const product = await prisma.product.findUnique({

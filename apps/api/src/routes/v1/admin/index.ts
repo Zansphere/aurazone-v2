@@ -13,10 +13,9 @@ import * as auditLogService from "../../../services/auditLog.service.js";
 import { prisma, Prisma } from "@aurazone/database";
 
 const adminRoutes: FastifyPluginAsync = async (fastify) => {
-  // All admin routes require authentication + admin role
+  // All admin routes require authentication + admin or store manager role
   fastify.addHook("preHandler", authenticate);
-  // fastify.addHook("preHandler", requireRole("SUPER_ADMIN", "STORE_MANAGER"));
-  fastify.addHook("preHandler", requireRole("SUPER_ADMIN"));
+  fastify.addHook("preHandler", requireRole("SUPER_ADMIN", "STORE_MANAGER"));
 
   // ╔═══════════════════════════════════════════════════════════════╗
   // ║  GLOBAL ADMIN SEARCH                                         ║
@@ -137,7 +136,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.post("/stores", async (request, reply) => {
+  fastify.post("/stores", { preHandler: [requireRole("SUPER_ADMIN")] }, async (request, reply) => {
     const parsed = storeSchema.safeParse(request.body);
     if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
     try {
@@ -164,7 +163,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.delete("/stores/:id", async (request, reply) => {
+  fastify.delete("/stores/:id", { preHandler: [requireRole("SUPER_ADMIN")] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
       await storeService.deleteStore(id, request.user!.userId);
@@ -174,7 +173,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.post("/stores/:id/restore", async (request, reply) => {
+  fastify.post("/stores/:id/restore", { preHandler: [requireRole("SUPER_ADMIN")] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
       const store = await storeService.restoreStore(id, request.user!.userId);
@@ -332,7 +331,11 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // Add images to a variant
   fastify.post("/products/:productId/variants/:variantId/images", async (request, reply) => {
     const { productId, variantId } = request.params as { productId: string; variantId: string };
-    const { urls } = request.body as { urls: Array<{ url: string; altText?: string; position?: number }> };
+    const { urls } = (request.body as { urls?: Array<{ url: string; altText?: string; position?: number }> }) || {};
+
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+      return sendError(reply, "urls array is required and must not be empty", 400);
+    }
 
     try {
       const product = await productService.getProductById(productId, fastify.redis);
@@ -469,13 +472,24 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/coupons", async (request, reply) => {
-    const body = request.body as any;
+    const body = (request.body as any) || {};
+    if (!body.code || typeof body.code !== "string" || !body.code.trim()) {
+      return sendError(reply, "Coupon code is required", 400);
+    }
+    if (!body.discountType || !["PERCENTAGE", "FIXED_AMOUNT"].includes(body.discountType)) {
+      return sendError(reply, "discountType must be PERCENTAGE or FIXED_AMOUNT", 400);
+    }
+    if (body.discountValue === undefined || body.discountValue === null || Number(body.discountValue) <= 0 || isNaN(Number(body.discountValue))) {
+      return sendError(reply, "discountValue must be a positive number", 400);
+    }
+
+    const cleanCode = body.code.trim().toUpperCase();
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
     if (allowedStoreIds && body.storeId && !allowedStoreIds.includes(body.storeId)) {
       return sendError(reply, "You do not have access to this store", 403);
     }
 
-    const existing = await prisma.coupon.findUnique({ where: { code: body.code.toUpperCase() } });
+    const existing = await prisma.coupon.findUnique({ where: { code: cleanCode } });
     if (existing) return sendError(reply, "Coupon code already exists", 400);
 
     const isProductSpecific = Boolean(body.isProductSpecific);
@@ -484,7 +498,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     const coupon = await prisma.$transaction(async (tx) => {
       const created = await tx.coupon.create({
         data: {
-          code: body.code.toUpperCase(),
+          code: cleanCode,
           description: body.description || null,
           discountType: body.discountType,
           discountValue: body.discountValue,
@@ -1084,9 +1098,11 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.patch("/inventory/:variantId", async (request, reply) => {
     const { variantId } = request.params as { variantId: string };
-    const { quantity, type, note } = request.body as { quantity: number; type?: string; note?: string };
+    const { quantity, type, note } = (request.body as { quantity?: number; type?: string; note?: string }) || {};
 
-    if (quantity === undefined || quantity === null) return sendError(reply, "quantity is required", 400);
+    if (quantity === undefined || quantity === null || typeof quantity !== "number" || isNaN(quantity) || quantity < 0 || !Number.isInteger(quantity)) {
+      return sendError(reply, "A valid non-negative integer quantity is required", 400);
+    }
 
     try {
       const inv = await prisma.inventory.findUnique({ 
@@ -1237,12 +1253,12 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/shipments", async (request, reply) => {
-    const body = request.body as {
-      orderId: string;
+    const body = (request.body as {
+      orderId?: string;
       courierName?: string;
       trackingNumber?: string;
       trackingUrl?: string;
-    };
+    }) || {};
 
     if (!body.orderId) return sendError(reply, "orderId is required", 400);
 
@@ -1746,7 +1762,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send(csvContent);
   });
 
-  fastify.get("/export/customers", async (request, reply) => {
+  fastify.get("/export/customers", { preHandler: [requireRole("SUPER_ADMIN")] }, async (request, reply) => {
     const customers = await prisma.user.findMany({
       where: { role: "CUSTOMER" },
       orderBy: { createdAt: "desc" },

@@ -135,6 +135,7 @@ export default function ImageUploader({
             <button
               type="button"
               onClick={() => onChange([])}
+              title="Remove image"
               className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity shadow"
             >
               <X size={10} />
@@ -189,6 +190,7 @@ export default function ImageUploader({
             <button
               type="button"
               onClick={() => removeImage(idx)}
+              title="Remove image"
               className="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500/90 text-white opacity-0 group-hover:opacity-100 transition-opacity"
             >
               <X size={8} />

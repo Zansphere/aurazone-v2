@@ -43,7 +43,7 @@ export async function createOrderFromCart(
         include: {
           variant: {
             include: {
-              product: { select: { id: true, name: true, slug: true, storeId: true, isActive: true } },
+              product: { select: { id: true, name: true, slug: true, storeId: true, isActive: true, deletedAt: true } },
               images: { take: 1, orderBy: { position: "asc" } },
               attributes: true,
               inventory: true,
@@ -91,7 +91,14 @@ export async function createOrderFromCart(
 
   // 2. Server-side validation of stock and item validity
   for (const item of cart.items) {
-    if (!item.variant || !item.variant.product.isActive || !item.variant.isAvailable) {
+    if (
+      !item.variant ||
+      item.variant.deletedAt !== null ||
+      !item.variant.isAvailable ||
+      !item.variant.product ||
+      item.variant.product.deletedAt !== null ||
+      !item.variant.product.isActive
+    ) {
       throw Object.assign(
         new Error(`Product variant "${item.variant?.product?.name || "Item"}" is no longer available`),
         { statusCode: 400 }
@@ -388,6 +395,324 @@ export async function createOrderFromCart(
   return order;
 }
 
+export async function createDirectOrder(
+  userId: string | undefined,
+  sessionId: string | undefined,
+  variantId: string,
+  quantity: number,
+  addressInput:
+    | string
+    | {
+        name: string;
+        phone: string;
+        addressLine1: string;
+        addressLine2?: string | null;
+        city: string;
+        state: string;
+        postalCode: string;
+        country: string;
+      },
+  paymentMethod: "RAZORPAY" | "COD",
+  guestEmail?: string,
+  couponCode?: string
+) {
+  const variant = await prisma.productVariant.findFirst({
+    where: { id: variantId, deletedAt: null },
+    include: {
+      product: { select: { id: true, name: true, slug: true, storeId: true, isActive: true, deletedAt: true } },
+      images: { take: 1, orderBy: { position: "asc" } },
+      attributes: true,
+      inventory: true,
+    },
+  });
+
+  if (
+    !variant ||
+    variant.deletedAt !== null ||
+    !variant.isAvailable ||
+    !variant.product ||
+    variant.product.deletedAt !== null ||
+    !variant.product.isActive
+  ) {
+    throw Object.assign(new Error("Product variant is no longer available"), { statusCode: 400 });
+  }
+
+  const availableStock = variant.inventory ? variant.inventory.quantity : 0;
+  if (quantity > availableStock) {
+    throw Object.assign(
+      new Error(`Insufficient physical stock for "${variant.product.name}"`),
+      { statusCode: 400 }
+    );
+  }
+
+  // 1. Resolve delivery address
+  let addressData: {
+    name: string;
+    phone: string;
+    addressLine1: string;
+    addressLine2?: string | null;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
+  };
+
+  if (typeof addressInput === "string") {
+    const address = await prisma.address.findFirst({
+      where: { id: addressInput, ...(userId && { userId }) },
+    });
+    if (!address) throw Object.assign(new Error("Address not found"), { statusCode: 404 });
+    addressData = {
+      name: address.name,
+      phone: address.phone,
+      addressLine1: address.addressLine1,
+      addressLine2: address.addressLine2 ?? null,
+      city: address.city,
+      state: address.state,
+      postalCode: address.postalCode,
+      country: address.country,
+    };
+  } else {
+    addressData = addressInput;
+  }
+
+  // 2. Calculations
+  const itemSubtotalPaise = calcItemSubtotalPaise(variant.price, quantity);
+  const subtotalPaise = itemSubtotalPaise;
+  let discountPaise = 0;
+  let appliedCouponId: string | null = null;
+
+  if (couponCode) {
+    const coupon = await prisma.coupon.findUnique({
+      where: { code: couponCode.toUpperCase() },
+      include: {
+        products: {
+          select: { productId: true },
+        },
+      },
+    });
+
+    if (!coupon || !coupon.isActive) {
+      throw Object.assign(new Error("Invalid or inactive coupon code"), { statusCode: 400 });
+    }
+    const now = new Date();
+    if (coupon.startDate && now < coupon.startDate) {
+      throw Object.assign(new Error("Coupon not active yet"), { statusCode: 400 });
+    }
+    if (coupon.endDate && now > coupon.endDate) {
+      throw Object.assign(new Error("Coupon has expired"), { statusCode: 400 });
+    }
+    if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+      throw Object.assign(new Error("Coupon usage limit reached"), { statusCode: 400 });
+    }
+
+    if (userId) {
+      const existingUsage = await prisma.couponUsage.findFirst({
+        where: { couponId: coupon.id, userId },
+      });
+      if (existingUsage) {
+        throw Object.assign(
+          new Error("You have already availed this coupon. Each coupon can only be used once per customer."),
+          { statusCode: 400 }
+        );
+      }
+    } else if (guestEmail) {
+      const existingUsage = await prisma.couponUsage.findFirst({
+        where: { couponId: coupon.id, email: guestEmail.toLowerCase() },
+      });
+      if (existingUsage) {
+        throw Object.assign(
+          new Error(`This coupon has already been availed with email ${guestEmail}.`),
+          { statusCode: 400 }
+        );
+      }
+    }
+
+    if (coupon.isProductSpecific) {
+      const assignedIds = new Set(coupon.products.map((p) => p.productId));
+      if (!assignedIds.has(variant.product.id)) {
+        throw Object.assign(
+          new Error("This coupon is only valid for specific products not including this item"),
+          { statusCode: 400 }
+        );
+      }
+      if (coupon.minOrderValue && subtotalPaise < toPaise(coupon.minOrderValue)) {
+        throw Object.assign(
+          new Error(`Minimum purchase amount of ₹${coupon.minOrderValue} required on eligible products`),
+          { statusCode: 400 }
+        );
+      }
+      discountPaise = calcDiscountPaise(
+        subtotalPaise,
+        coupon.discountType as any,
+        coupon.discountValue,
+        coupon.maxDiscount
+      );
+    } else {
+      if (coupon.storeId && coupon.storeId !== variant.product.storeId) {
+        throw Object.assign(
+          new Error("This coupon is only valid for items from a specific store"),
+          { statusCode: 400 }
+        );
+      }
+      if (coupon.minOrderValue && subtotalPaise < toPaise(coupon.minOrderValue)) {
+        throw Object.assign(
+          new Error(`Minimum order value of ₹${coupon.minOrderValue} required for this coupon`),
+          { statusCode: 400 }
+        );
+      }
+      discountPaise = calcDiscountPaise(
+        subtotalPaise,
+        coupon.discountType as any,
+        coupon.discountValue,
+        coupon.maxDiscount
+      );
+    }
+
+    appliedCouponId = coupon.id;
+  }
+
+  const taxableAmountPaise = Math.max(0, subtotalPaise - discountPaise);
+  const deliveryFeePaise = calcDeliveryFeePaise(taxableAmountPaise);
+  const totalAmountPaise = taxableAmountPaise + deliveryFeePaise;
+
+  const totalAmountDecimal = toRupees(totalAmountPaise);
+  const discountAmountDecimal = toRupees(discountPaise);
+
+  const orderNumber = generateOrderNumber();
+  const trackingToken = paymentMethod === "COD" ? crypto.randomBytes(16).toString("hex") : null;
+
+  const store = await prisma.store.findUnique({
+    where: { id: variant.product.storeId },
+    select: { id: true, name: true },
+  });
+  const storeName = store?.name ?? "Unknown Store";
+
+  let validSessionId: string | null = null;
+  if (!userId && sessionId) {
+    const guestSession = await prisma.guestSession.findFirst({
+      where: {
+        OR: [{ id: sessionId }, { sessionId }],
+      },
+    });
+    validSessionId = guestSession?.id ?? null;
+  }
+
+  // 3. Atomic Database Transaction
+  const order = await prisma.$transaction(
+    async (tx) => {
+      const newOrder = await tx.order.create({
+        data: {
+          orderNumber,
+          trackingToken,
+          userId: userId ?? null,
+          sessionId: validSessionId,
+          status: "PENDING",
+          paymentStatus: "PENDING",
+          paymentMethod,
+          totalAmount: totalAmountDecimal,
+          couponId: appliedCouponId,
+          discountAmount: discountAmountDecimal,
+          notes: guestEmail ? `Guest Email: ${guestEmail}` : null,
+          items: {
+            create: [
+              {
+                variantId: variant.id,
+                productName: variant.product.name,
+                productSlug: variant.product.slug,
+                storeName,
+                imageUrl: variant.images[0]?.url ?? null,
+                attributesSnapshot: variant.attributes.map((a) => ({
+                  key: a.key,
+                  value: a.value,
+                })),
+                price: variant.price,
+                quantity,
+                subtotal: toRupees(itemSubtotalPaise),
+              },
+            ],
+          },
+          orderAddress: {
+            create: addressData,
+          },
+        },
+        include: { items: true },
+      });
+
+      if (appliedCouponId) {
+        const couponUpdate = await tx.$executeRaw`
+          UPDATE "Coupon"
+          SET used_count = used_count + 1
+          WHERE id = ${appliedCouponId}
+            AND (usage_limit IS NULL OR used_count < usage_limit)
+        `;
+        if (couponUpdate === 0) {
+          throw Object.assign(new Error("Coupon usage limit reached during checkout"), {
+            statusCode: 409,
+          });
+        }
+
+        await tx.couponUsage.create({
+          data: {
+            couponId: appliedCouponId,
+            userId: userId ?? null,
+            email: guestEmail ? guestEmail.toLowerCase() : null,
+            orderId: newOrder.id,
+          },
+        });
+      }
+
+      await commitOrderInventory(
+        newOrder.id,
+        newOrder.orderNumber,
+        [{ variantId: variant.id, quantity }],
+        tx,
+        userId ?? validSessionId ?? "DIRECT_CHECKOUT"
+      );
+
+      await tx.orderLog.create({
+        data: {
+          orderId: newOrder.id,
+          orderNumberSnapshot: newOrder.orderNumber,
+          adminId: null,
+          action: "ORDER_CREATED",
+          fromStatus: null,
+          toStatus: "PENDING",
+          note: `Direct order placed via ${paymentMethod}. Total: ₹${totalAmountDecimal}`,
+          metadata: {
+            paymentMethod,
+            totalAmountPaise,
+            subtotalPaise,
+            discountPaise,
+            deliveryFeePaise,
+            directCheckout: true,
+          },
+        },
+      });
+
+      return newOrder;
+    },
+    {
+      maxWait: 10000,
+      timeout: 30000,
+    }
+  );
+
+  const emailToSend =
+    guestEmail ??
+    (userId ? (await prisma.user.findUnique({ where: { id: userId } }))?.email : null);
+
+  if (emailToSend) {
+    try {
+      await EmailService.sendOrderConfirmation(emailToSend, order.orderNumber, Number(order.totalAmount));
+    } catch (error) {
+      console.error("[OrderService] Failed to send direct order confirmation email:", error);
+    }
+  }
+
+  return order;
+}
+
 export async function getUserOrders(
   auth: { userId?: string; sessionId?: string; skip?: number; take?: number } | string,
   skipArg = 0,
@@ -491,7 +816,10 @@ export async function cancelOrder(
   id: string,
   auth?: { userId?: string; sessionId?: string; trackingToken?: string } | string
 ) {
-  const order = await prisma.order.findUnique({ where: { id }, include: { items: true, user: true } });
+  const order = await prisma.order.findUnique({
+    where: { id },
+    include: { items: true, user: true, payments: { where: { status: "SUCCESS" } } },
+  });
   if (!order) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
 
   const userId = typeof auth === "string" ? auth : auth?.userId;
@@ -512,12 +840,27 @@ export async function cancelOrder(
     throw Object.assign(new Error("Order cannot be cancelled in its current status"), { statusCode: 400 });
   }
 
-  return transitionOrderStatus({
+  const result = await transitionOrderStatus({
     orderId: id,
     toStatus: "CANCELLED",
     actorId: userId ?? sessionId ?? "CUSTOMER",
     reason: "Cancelled by customer",
   });
+
+  // If order was already paid, auto-initiate refund
+  if (order.paymentStatus === "SUCCESS" && order.payments.length > 0) {
+    try {
+      await initiateRefund({
+        orderId: id,
+        reason: "Auto-refund on customer order cancellation",
+        adminId: "SYSTEM_AUTO_REFUND",
+      });
+    } catch (err) {
+      console.error("[OrderService] Failed to auto-initiate refund on cancellation:", err);
+    }
+  }
+
+  return result;
 }
 
 /**

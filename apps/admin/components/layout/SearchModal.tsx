@@ -160,7 +160,7 @@ export function SearchModal({
           {matchingPages.length > 0 && (
             <div>
               <p className="px-2 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-tertiary)]">
-                Navigation
+                Quick Navigation
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
                 {matchingPages.slice(0, 6).map((page) => (

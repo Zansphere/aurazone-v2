@@ -49,16 +49,18 @@ export default function StoreOverview({ store }: { store: Store }) {
       <form onSubmit={handleSave} className="space-y-4 fade-in">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="form-label">Store Name</label>
+            <label htmlFor="store-name" className="form-label">Store Name</label>
             <input
+              id="store-name"
               type="text" className="form-input" required
               value={form.name}
               onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
             />
           </div>
           <div>
-            <label className="form-label">Slug</label>
+            <label htmlFor="store-slug" className="form-label">Slug</label>
             <input
+              id="store-slug"
               type="text" className="form-input font-mono text-xs"
               value={form.slug}
               onChange={(e) => setForm(f => ({ ...f, slug: e.target.value }))}
@@ -66,8 +68,9 @@ export default function StoreOverview({ store }: { store: Store }) {
           </div>
         </div>
         <div>
-          <label className="form-label">Description</label>
+          <label htmlFor="store-desc" className="form-label">Description</label>
           <textarea
+            id="store-desc"
             className="form-input min-h-[80px] resize-y"
             value={form.description}
             onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))}
@@ -107,8 +110,9 @@ export default function StoreOverview({ store }: { store: Store }) {
             </div>
           </div>
           <div>
-            <label className="form-label">Status</label>
+            <label htmlFor="store-status" className="form-label">Status</label>
             <select
+              id="store-status"
               className="form-input"
               value={form.isActive ? "active" : "inactive"}
               onChange={(e) => setForm(f => ({ ...f, isActive: e.target.value === "active" }))}
@@ -133,7 +137,7 @@ export default function StoreOverview({ store }: { store: Store }) {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Store Information</h3>
         <button onClick={() => setEditing(true)} className="btn-secondary text-xs flex items-center gap-1.5">
-          <Edit2 size={12} /> Edit
+          <Edit2 size={12} /> Edit Details
         </button>
       </div>
 

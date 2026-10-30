@@ -157,13 +157,27 @@ export function CartDrawer() {
             <p className="text-xs text-[var(--color-text-tertiary)] text-center">
               Taxes and shipping calculated at checkout.
             </p>
-            <button
-              onClick={() => { setIsOpen(false); router.push("/checkout"); }}
-              className="btn-primary w-full py-4 text-base flex justify-center items-center gap-2 group"
-            >
-              Proceed to Checkout
-              <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
-            </button>
+            {cart?.hasUnavailableItems || items.some((it: any) => it.isAvailable === false || it.unavailableReason || !it.variant?.product?.name) ? (
+              <div className="space-y-2">
+                <button
+                  disabled
+                  className="w-full py-4 text-sm font-semibold rounded-xl bg-gray-400 text-white cursor-not-allowed opacity-80"
+                >
+                  Remove unavailable items to checkout
+                </button>
+                <p className="text-[11px] text-center text-rose-600 font-medium">
+                  Some items in your cart are no longer available.
+                </p>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setIsOpen(false); router.push("/checkout"); }}
+                className="btn-primary w-full py-4 text-base flex justify-center items-center gap-2 group"
+              >
+                Proceed to Checkout
+                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+              </button>
+            )}
           </div>
         )}
       </div>

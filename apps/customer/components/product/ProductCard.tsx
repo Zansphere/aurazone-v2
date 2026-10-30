@@ -36,11 +36,12 @@ export function ProductCard({ product, viewMode = "grid" }: ProductCardProps) {
   const { addToCart, isLoading: cartLoading } = useCartStore();
 
   const variant = product.variants?.[0];
+  const isAvailable = (product as any).isActive !== false && variant && (variant as any).isAvailable !== false && !(variant as any).deletedAt;
   const price = Number(variant?.price ?? 0);
   const comparePrice = variant?.compareAtPrice ? Number(variant.compareAtPrice) : null;
   const imageUrl = variant?.images?.[0]?.url;
   const discount = comparePrice ? Math.round(((comparePrice - price) / comparePrice) * 100) : 0;
-  const stock = variant?.inventory?.quantity ?? 10;
+  const stock = isAvailable ? (variant?.inventory?.quantity ?? 10) : 0;
 
   const { data: wishlistData } = useQuery({
     queryKey: ["wishlist"],

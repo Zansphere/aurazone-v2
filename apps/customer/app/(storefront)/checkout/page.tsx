@@ -42,6 +42,94 @@ export default function CheckoutPage() {
     name: "", phone: "", addressLine1: "", addressLine2: "",
     city: "", state: "", postalCode: "", country: "India"
   });
+  const [addressErrors, setAddressErrors] = useState<Record<string, string>>({});
+  const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({});
+
+  const validateField = (field: string, value: string): string => {
+    const trimmed = (value || "").trim();
+    switch (field) {
+      case "name":
+        if (!trimmed) return "Full Name is required";
+        if (trimmed.length < 2) return "Name must be at least 2 characters";
+        if (trimmed.length > 70) return "Name cannot exceed 70 characters";
+        if (!/^[a-zA-Z\s.'-]+$/.test(trimmed)) return "Name should only contain letters and spaces";
+        return "";
+      case "phone":
+        if (!trimmed) return "Phone number is required";
+        const cleanedPhone = trimmed.replace(/\s+/g, "");
+        if (!/^(?:\+91[\-\s]?)?[6-9]\d{9}$|^\+?[1-9]\d{9,14}$/.test(cleanedPhone)) {
+          return "Please enter a valid 10-digit mobile number (e.g. 9876543210)";
+        }
+        return "";
+      case "addressLine1":
+        if (!trimmed) return "Address Line 1 is required";
+        if (trimmed.length < 5) return "Address must be at least 5 characters";
+        if (trimmed.length > 120) return "Address cannot exceed 120 characters";
+        return "";
+      case "addressLine2":
+        if (trimmed.length > 120) return "Address Line 2 cannot exceed 120 characters";
+        return "";
+      case "city":
+        if (!trimmed) return "City is required";
+        if (trimmed.length < 2) return "City must be at least 2 characters";
+        if (trimmed.length > 50) return "City cannot exceed 50 characters";
+        if (!/^[a-zA-Z\s.-]+$/.test(trimmed)) return "City should only contain letters and spaces";
+        return "";
+      case "state":
+        if (!trimmed) return "State is required";
+        if (trimmed.length < 2) return "State must be at least 2 characters";
+        if (trimmed.length > 50) return "State cannot exceed 50 characters";
+        return "";
+      case "postalCode":
+        if (!trimmed) return "PIN code is required";
+        if (!/^\d{6}$/.test(trimmed)) return "Please enter a valid 6-digit PIN code (e.g. 400001)";
+        return "";
+      case "guestEmail":
+        if (!trimmed) return "Email address is required";
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return "Please enter a valid email address";
+        if (trimmed.length > 100) return "Email cannot exceed 100 characters";
+        return "";
+      default:
+        return "";
+    }
+  };
+
+  const handleFieldChange = (field: string, value: string) => {
+    let cleanVal = value;
+    if (field === "phone") {
+      cleanVal = value.replace(/[^\d+]/g, "").slice(0, 13);
+    } else if (field === "postalCode") {
+      cleanVal = value.replace(/\D/g, "").slice(0, 6);
+    }
+    setAddressForm(prev => ({ ...prev, [field]: cleanVal }));
+    if (touchedFields[field]) {
+      const err = validateField(field, cleanVal);
+      setAddressErrors(prev => ({ ...prev, [field]: err }));
+    }
+  };
+
+  const handleFieldBlur = (field: string) => {
+    setTouchedFields(prev => ({ ...prev, [field]: true }));
+    const val = field === "guestEmail" ? guestEmail : (addressForm as any)[field];
+    const err = validateField(field, val);
+    setAddressErrors(prev => ({ ...prev, [field]: err }));
+  };
+
+  const validateAllAddressFields = (): boolean => {
+    const errors: Record<string, string> = {};
+    const fieldsToValidate = ["name", "phone", "addressLine1", "city", "state", "postalCode"];
+    if (isGuest) fieldsToValidate.push("guestEmail");
+
+    for (const f of fieldsToValidate) {
+      const val = f === "guestEmail" ? guestEmail : (addressForm as any)[f];
+      const err = validateField(f, val);
+      if (err) errors[f] = err;
+    }
+    setAddressErrors(errors);
+    const allTouched = fieldsToValidate.reduce((acc, f) => ({ ...acc, [f]: true }), {});
+    setTouchedFields(prev => ({ ...prev, ...allTouched }));
+    return Object.keys(errors).length === 0;
+  };
 
   const { cart, isLoading: isCartLoading, fetchCart } = useCartStore();
 
@@ -175,14 +263,42 @@ export default function CheckoutPage() {
   // Standard 18% GST included in product prices: Base = Subtotal / 1.18, GST = Subtotal * 18 / 118
   const estimatedTax = Math.round((discountedSubtotal * 18) / 118); // 18% inclusive GST
 
+  const hasUnavailableItems = Boolean(
+    cart?.hasUnavailableItems ||
+    items.some((it: any) => it.isAvailable === false || it.unavailableReason || !it.variant?.product?.name)
+  );
+
   const isGuest = !isAuthenticated;
   const showAddressForm = isGuest || isAddingNew || addresses.length === 0;
   
-  const canPlaceOrder = showAddressForm
-    ? (addressForm.name && addressForm.phone && addressForm.addressLine1 && addressForm.city && addressForm.postalCode && (!isGuest || guestEmail))
-    : !!selectedAddressId;
+  const isAddressValid = Boolean(
+    addressForm.name.trim().length >= 2 &&
+    /^(?:\+91[\-\s]?)?[6-9]\d{9}$|^\+?[1-9]\d{9,14}$/.test(addressForm.phone.replace(/\s+/g, '')) &&
+    addressForm.addressLine1.trim().length >= 5 &&
+    addressForm.city.trim().length >= 2 &&
+    addressForm.state.trim().length >= 2 &&
+    /^\d{6}$/.test(addressForm.postalCode.trim()) &&
+    (!isGuest || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail.trim())) &&
+    !Object.values(addressErrors).some(Boolean)
+  );
+
+  const canPlaceOrder = !hasUnavailableItems && (
+    showAddressForm ? isAddressValid : !!selectedAddressId
+  );
 
   const handlePlaceOrder = () => {
+    if (hasUnavailableItems) {
+      alert("Some items in your cart are no longer available. Please update your cart before placing an order.");
+      return;
+    }
+    if (showAddressForm) {
+      const isValid = validateAllAddressFields();
+      if (!isValid) return;
+    } else if (!selectedAddressId) {
+      alert("Please select a delivery address.");
+      return;
+    }
+
     const data: any = { 
       paymentMethod,
       notes: orderNotes.trim() ? `[Delivery: ${deliveryOption.toUpperCase()}] ${orderNotes.trim()}` : `[Delivery: ${deliveryOption.toUpperCase()}]`
@@ -190,8 +306,17 @@ export default function CheckoutPage() {
     if (appliedCoupon) data.couponCode = appliedCoupon.code;
     
     if (showAddressForm) {
-      data.address = addressForm;
-      if (isGuest) data.guestEmail = guestEmail;
+      data.address = {
+        name: addressForm.name.trim(),
+        phone: addressForm.phone.trim(),
+        addressLine1: addressForm.addressLine1.trim(),
+        addressLine2: addressForm.addressLine2.trim() || undefined,
+        city: addressForm.city.trim(),
+        state: addressForm.state.trim(),
+        postalCode: addressForm.postalCode.trim(),
+        country: "IN",
+      };
+      if (isGuest) data.guestEmail = guestEmail.trim().toLowerCase();
     } else {
       data.addressId = selectedAddressId;
     }
@@ -284,6 +409,26 @@ export default function CheckoutPage() {
 
         <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-6">Checkout</h1>
 
+        {hasUnavailableItems && (
+          <div className="mb-6 rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-900 shadow-sm flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="text-xl shrink-0">⚠️</span>
+              <div>
+                <p className="font-bold text-sm text-rose-950">Items No Longer Available</p>
+                <p className="text-xs text-rose-800 mt-0.5">
+                  Some items in your cart are no longer available or out of stock. Please return to your cart and update your items before placing an order.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/cart"
+              className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 transition-colors shadow-sm"
+            >
+              Update Cart
+            </Link>
+          </div>
+        )}
+
         {placeOrderMutation.isError && (
           <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600 mb-6">
             {(placeOrderMutation.error as Error).message}
@@ -299,8 +444,24 @@ export default function CheckoutPage() {
                 </p>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-[var(--color-text-secondary)]">Email Address</label>
-                  <input type="email" value={guestEmail} onChange={e => setGuestEmail(e.target.value)} required
-                    className="w-full rounded-lg border border-[var(--color-border)] p-2.5 text-sm" placeholder="For order updates" />
+                  <input
+                    type="email"
+                    value={guestEmail}
+                    maxLength={100}
+                    onChange={e => {
+                      setGuestEmail(e.target.value);
+                      if (touchedFields.guestEmail) {
+                        setAddressErrors(prev => ({ ...prev, guestEmail: validateField("guestEmail", e.target.value) }));
+                      }
+                    }}
+                    onBlur={() => handleFieldBlur("guestEmail")}
+                    required
+                    className={`w-full rounded-lg border p-2.5 text-sm ${addressErrors.guestEmail ? "border-rose-400 focus:ring-rose-200" : "border-[var(--color-border)]"}`}
+                    placeholder="For order updates"
+                  />
+                  {addressErrors.guestEmail && (
+                    <p className="text-xs text-rose-600 mt-1 font-medium">{addressErrors.guestEmail}</p>
+                  )}
                 </div>
               </div>
             )}
@@ -320,14 +481,107 @@ export default function CheckoutPage() {
               
               {showAddressForm ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <input type="text" placeholder="Full Name" value={addressForm.name} onChange={e => setAddressForm({...addressForm, name: e.target.value})} className="sm:col-span-2 rounded-lg border border-[var(--color-border)] p-2.5 text-sm" required />
-                  <input type="tel" placeholder="Phone Number" value={addressForm.phone} onChange={e => setAddressForm({...addressForm, phone: e.target.value})} className="sm:col-span-2 rounded-lg border border-[var(--color-border)] p-2.5 text-sm" required />
-                  <input type="text" placeholder="Address Line 1" value={addressForm.addressLine1} onChange={e => setAddressForm({...addressForm, addressLine1: e.target.value})} className="sm:col-span-2 rounded-lg border border-[var(--color-border)] p-2.5 text-sm" required />
-                  <input type="text" placeholder="Address Line 2 (Optional)" value={addressForm.addressLine2} onChange={e => setAddressForm({...addressForm, addressLine2: e.target.value})} className="sm:col-span-2 rounded-lg border border-[var(--color-border)] p-2.5 text-sm" />
-                  <input type="text" placeholder="City" value={addressForm.city} onChange={e => setAddressForm({...addressForm, city: e.target.value})} className="col-span-1 rounded-lg border border-[var(--color-border)] p-2.5 text-sm" required />
-                  <input type="text" placeholder="State" value={addressForm.state} onChange={e => setAddressForm({...addressForm, state: e.target.value})} className="col-span-1 rounded-lg border border-[var(--color-border)] p-2.5 text-sm" required />
-                  <input type="text" placeholder="Postal Code" value={addressForm.postalCode} onChange={e => setAddressForm({...addressForm, postalCode: e.target.value})} className="col-span-1 rounded-lg border border-[var(--color-border)] p-2.5 text-sm" required />
-                  <input type="text" value="India" readOnly className="col-span-1 rounded-lg border border-[var(--color-border)] p-2.5 text-sm bg-gray-50" />
+                  <div className="sm:col-span-2">
+                    <input
+                      type="text"
+                      placeholder="Full Name"
+                      maxLength={70}
+                      value={addressForm.name}
+                      onChange={e => handleFieldChange("name", e.target.value)}
+                      onBlur={() => handleFieldBlur("name")}
+                      className={`w-full rounded-lg border p-2.5 text-sm ${addressErrors.name ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+                      required
+                    />
+                    {addressErrors.name && <p className="text-xs text-rose-600 mt-1 font-medium">{addressErrors.name}</p>}
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <input
+                      type="tel"
+                      placeholder="Phone Number (10 digits)"
+                      maxLength={13}
+                      value={addressForm.phone}
+                      onChange={e => handleFieldChange("phone", e.target.value)}
+                      onBlur={() => handleFieldBlur("phone")}
+                      className={`w-full rounded-lg border p-2.5 text-sm ${addressErrors.phone ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+                      required
+                    />
+                    {addressErrors.phone && <p className="text-xs text-rose-600 mt-1 font-medium">{addressErrors.phone}</p>}
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <input
+                      type="text"
+                      placeholder="Address Line 1"
+                      maxLength={120}
+                      value={addressForm.addressLine1}
+                      onChange={e => handleFieldChange("addressLine1", e.target.value)}
+                      onBlur={() => handleFieldBlur("addressLine1")}
+                      className={`w-full rounded-lg border p-2.5 text-sm ${addressErrors.addressLine1 ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+                      required
+                    />
+                    {addressErrors.addressLine1 && <p className="text-xs text-rose-600 mt-1 font-medium">{addressErrors.addressLine1}</p>}
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <input
+                      type="text"
+                      placeholder="Address Line 2 (Optional)"
+                      maxLength={120}
+                      value={addressForm.addressLine2}
+                      onChange={e => handleFieldChange("addressLine2", e.target.value)}
+                      onBlur={() => handleFieldBlur("addressLine2")}
+                      className={`w-full rounded-lg border p-2.5 text-sm ${addressErrors.addressLine2 ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+                    />
+                    {addressErrors.addressLine2 && <p className="text-xs text-rose-600 mt-1 font-medium">{addressErrors.addressLine2}</p>}
+                  </div>
+
+                  <div className="col-span-1">
+                    <input
+                      type="text"
+                      placeholder="City"
+                      maxLength={50}
+                      value={addressForm.city}
+                      onChange={e => handleFieldChange("city", e.target.value)}
+                      onBlur={() => handleFieldBlur("city")}
+                      className={`w-full rounded-lg border p-2.5 text-sm ${addressErrors.city ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+                      required
+                    />
+                    {addressErrors.city && <p className="text-xs text-rose-600 mt-1 font-medium">{addressErrors.city}</p>}
+                  </div>
+
+                  <div className="col-span-1">
+                    <input
+                      type="text"
+                      placeholder="State"
+                      maxLength={50}
+                      value={addressForm.state}
+                      onChange={e => handleFieldChange("state", e.target.value)}
+                      onBlur={() => handleFieldBlur("state")}
+                      className={`w-full rounded-lg border p-2.5 text-sm ${addressErrors.state ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+                      required
+                    />
+                    {addressErrors.state && <p className="text-xs text-rose-600 mt-1 font-medium">{addressErrors.state}</p>}
+                  </div>
+
+                  <div className="col-span-1">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="PIN Code (6 digits)"
+                      maxLength={6}
+                      value={addressForm.postalCode}
+                      onChange={e => handleFieldChange("postalCode", e.target.value)}
+                      onBlur={() => handleFieldBlur("postalCode")}
+                      className={`w-full rounded-lg border p-2.5 text-sm ${addressErrors.postalCode ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+                      required
+                    />
+                    {addressErrors.postalCode && <p className="text-xs text-rose-600 mt-1 font-medium">{addressErrors.postalCode}</p>}
+                  </div>
+
+                  <div className="col-span-1">
+                    <input type="text" value="India" readOnly className="w-full rounded-lg border border-[var(--color-border)] p-2.5 text-sm bg-gray-50 text-[var(--color-text-secondary)]" />
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -488,20 +742,31 @@ export default function CheckoutPage() {
               <h2 className="text-sm font-semibold text-[var(--color-text-primary)] mb-4">Order Summary</h2>
               
               <div className="space-y-4 mb-4 max-h-[30vh] overflow-y-auto pr-2">
-                {items.map((item: any) => (
-                  <div key={item.id} className="flex gap-3">
-                    <div className="h-12 w-12 shrink-0 rounded-md bg-[var(--color-bg-muted)] overflow-hidden">
-                      {item.variant.images?.[0]?.url && (
-                        <img src={item.variant.images[0].url} alt={item.variant.product.name} className="h-full w-full object-cover" />
-                      )}
+                {items.map((item: any) => {
+                  const isItemUnavailable = item.isAvailable === false || Boolean(item.unavailableReason) || !item.variant?.product?.name;
+                  return (
+                    <div key={item.id} className={`flex gap-3 p-2 rounded-lg ${isItemUnavailable ? "bg-rose-50/70 border border-rose-200" : ""}`}>
+                      <div className="h-12 w-12 shrink-0 rounded-md bg-[var(--color-bg-muted)] overflow-hidden">
+                        {item.variant?.images?.[0]?.url && (
+                          <img src={item.variant.images[0].url} alt={item.variant.product?.name ?? "Product"} className="h-full w-full object-cover" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs font-medium text-[var(--color-text-primary)] truncate">{item.variant?.product?.name ?? "Product"}</p>
+                          {isItemUnavailable && (
+                            <span className="text-[10px] font-bold text-rose-600 bg-rose-100 px-1.5 py-0.5 rounded shrink-0">Unavailable</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[var(--color-text-secondary)]">Qty: {item.quantity}</p>
+                        {item.unavailableReason && (
+                          <p className="text-[10px] text-rose-600 mt-0.5 font-medium">{item.unavailableReason}</p>
+                        )}
+                      </div>
+                      <div className="text-xs font-medium">₹{(Number(item.unitPrice) * item.quantity).toLocaleString()}</div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-[var(--color-text-primary)] truncate">{item.variant.product.name}</p>
-                      <p className="text-xs text-[var(--color-text-secondary)]">Qty: {item.quantity}</p>
-                    </div>
-                    <div className="text-xs font-medium">₹{(item.unitPrice * item.quantity).toLocaleString()}</div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="space-y-2 text-sm border-t border-[var(--color-border)] pt-4">
@@ -541,10 +806,14 @@ export default function CheckoutPage() {
               <button
                 onClick={handlePlaceOrder}
                 disabled={!canPlaceOrder || isProcessing}
-                className="w-full mt-6 flex items-center justify-center gap-2 rounded-xl bg-[var(--color-primary)] py-4 text-sm font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full mt-6 flex items-center justify-center gap-2 rounded-xl bg-[var(--color-primary)] py-4 text-sm font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
               >
                 <Lock size={14} />
-                {isProcessing ? "Processing..." : `Place Order · ₹${total.toLocaleString()}`}
+                {isProcessing
+                  ? "Processing..."
+                  : hasUnavailableItems
+                  ? "Update Cart to Continue"
+                  : `Place Order · ₹${total.toLocaleString()}`}
               </button>
             </div>
           </div>

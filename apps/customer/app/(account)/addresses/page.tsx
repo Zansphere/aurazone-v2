@@ -12,6 +12,65 @@ export default function AddressesPage() {
   const [form, setForm] = useState({
     name: "", phone: "", addressLine1: "", addressLine2: "", city: "", state: "", postalCode: "", isDefault: false,
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const validateField = (field: string, value: string): string => {
+    const trimmed = (value || "").trim();
+    switch (field) {
+      case "name":
+        if (!trimmed) return "Full Name is required";
+        if (trimmed.length < 2) return "Name must be at least 2 characters";
+        if (trimmed.length > 70) return "Name cannot exceed 70 characters";
+        if (!/^[a-zA-Z\s.'-]+$/.test(trimmed)) return "Name should only contain letters and spaces";
+        return "";
+      case "phone":
+        if (!trimmed) return "Phone number is required";
+        const cleanedPhone = trimmed.replace(/\s+/g, "");
+        if (!/^(?:\+91[\-\s]?)?[6-9]\d{9}$|^\+?[1-9]\d{9,14}$/.test(cleanedPhone)) {
+          return "Please enter a valid 10-digit mobile number (e.g. 9876543210)";
+        }
+        return "";
+      case "addressLine1":
+        if (!trimmed) return "Address is required";
+        if (trimmed.length < 5) return "Address must be at least 5 characters";
+        if (trimmed.length > 120) return "Address cannot exceed 120 characters";
+        return "";
+      case "addressLine2":
+        if (trimmed.length > 120) return "Address Line 2 cannot exceed 120 characters";
+        return "";
+      case "city":
+        if (!trimmed) return "City is required";
+        if (trimmed.length < 2) return "City must be at least 2 characters";
+        if (trimmed.length > 50) return "City cannot exceed 50 characters";
+        if (!/^[a-zA-Z\s.-]+$/.test(trimmed)) return "City should only contain letters and spaces";
+        return "";
+      case "state":
+        if (!trimmed) return "State is required";
+        if (trimmed.length < 2) return "State must be at least 2 characters";
+        if (trimmed.length > 50) return "State cannot exceed 50 characters";
+        return "";
+      case "postalCode":
+        if (!trimmed) return "PIN code is required";
+        if (!/^\d{6}$/.test(trimmed)) return "Please enter a valid 6-digit PIN code (e.g. 400001)";
+        return "";
+      default:
+        return "";
+    }
+  };
+
+  const handleFieldChange = (field: string, value: string) => {
+    let cleanVal = value;
+    if (field === "phone") {
+      cleanVal = value.replace(/[^\d+]/g, "").slice(0, 13);
+    } else if (field === "postalCode") {
+      cleanVal = value.replace(/\D/g, "").slice(0, 6);
+    }
+    setForm(prev => ({ ...prev, [field]: cleanVal }));
+    setSubmitError(null);
+    const err = validateField(field, cleanVal);
+    setFieldErrors(prev => ({ ...prev, [field]: err }));
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ["addresses"],
@@ -20,13 +79,48 @@ export default function AddressesPage() {
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/users/addresses", data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["addresses"] }); setShowForm(false); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["addresses"] });
+      setShowForm(false);
+      setForm({ name: "", phone: "", addressLine1: "", addressLine2: "", city: "", state: "", postalCode: "", isDefault: false });
+      setFieldErrors({});
+      setSubmitError(null);
+    },
+    onError: (err: any) => {
+      setSubmitError(err.message || "Failed to save address. Please check your inputs.");
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/users/addresses/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["addresses"] }),
   });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitError(null);
+    const errors: Record<string, string> = {};
+    for (const field of ["name", "phone", "addressLine1", "city", "state", "postalCode"]) {
+      const err = validateField(field, (form as any)[field]);
+      if (err) errors[field] = err;
+    }
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      return;
+    }
+
+    createMutation.mutate({
+      name: form.name.trim(),
+      phone: form.phone.trim(),
+      addressLine1: form.addressLine1.trim(),
+      addressLine2: form.addressLine2.trim() || undefined,
+      city: form.city.trim(),
+      state: form.state.trim(),
+      postalCode: form.postalCode.trim(),
+      country: "IN",
+      isDefault: form.isDefault,
+    });
+  };
 
   const addresses = data?.data ?? [];
 
@@ -35,45 +129,129 @@ export default function AddressesPage() {
       <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Saved Addresses</h2>
-        <button onClick={() => setShowForm(!showForm)}
+        <button onClick={() => { setShowForm(!showForm); setSubmitError(null); setFieldErrors({}); }}
           className="flex items-center gap-1 text-xs font-medium text-[var(--color-accent)] hover:underline">
           <Plus size={14} /> Add Address
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={(e) => { e.preventDefault(); createMutation.mutate(form); }}
+        <form onSubmit={handleSubmit}
           className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-4 space-y-3">
+          {submitError && (
+            <div className="rounded-lg bg-rose-50 border border-rose-200 p-3 text-xs text-rose-700 font-medium">
+              {submitError}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <input type="text" placeholder="Full Name" required value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm outline-none" />
-            <input type="tel" placeholder="Phone" required value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm outline-none" />
+            <div>
+              <input
+                type="text"
+                placeholder="Full Name"
+                maxLength={70}
+                required
+                value={form.name}
+                onChange={(e) => handleFieldChange("name", e.target.value)}
+                className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${fieldErrors.name ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+              />
+              {fieldErrors.name && <p className="text-xs text-rose-600 mt-1">{fieldErrors.name}</p>}
+            </div>
+
+            <div>
+              <input
+                type="tel"
+                placeholder="Mobile Number (10 digits)"
+                maxLength={13}
+                required
+                value={form.phone}
+                onChange={(e) => handleFieldChange("phone", e.target.value)}
+                className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${fieldErrors.phone ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+              />
+              {fieldErrors.phone && <p className="text-xs text-rose-600 mt-1">{fieldErrors.phone}</p>}
+            </div>
           </div>
-          <input type="text" placeholder="Address Line 1" required value={form.addressLine1}
-            onChange={(e) => setForm({ ...form, addressLine1: e.target.value })}
-            className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm outline-none" />
-          <input type="text" placeholder="Address Line 2 (optional)" value={form.addressLine2}
-            onChange={(e) => setForm({ ...form, addressLine2: e.target.value })}
-            className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm outline-none" />
+
+          <div>
+            <input
+              type="text"
+              placeholder="Address Line 1"
+              maxLength={120}
+              required
+              value={form.addressLine1}
+              onChange={(e) => handleFieldChange("addressLine1", e.target.value)}
+              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${fieldErrors.addressLine1 ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+            />
+            {fieldErrors.addressLine1 && <p className="text-xs text-rose-600 mt-1">{fieldErrors.addressLine1}</p>}
+          </div>
+
+          <div>
+            <input
+              type="text"
+              placeholder="Address Line 2 (optional)"
+              maxLength={120}
+              value={form.addressLine2}
+              onChange={(e) => handleFieldChange("addressLine2", e.target.value)}
+              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${fieldErrors.addressLine2 ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+            />
+            {fieldErrors.addressLine2 && <p className="text-xs text-rose-600 mt-1">{fieldErrors.addressLine2}</p>}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <input type="text" placeholder="City" required value={form.city}
-              onChange={(e) => setForm({ ...form, city: e.target.value })}
-              className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm outline-none" />
-            <input type="text" placeholder="State" required value={form.state}
-              onChange={(e) => setForm({ ...form, state: e.target.value })}
-              className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm outline-none" />
-            <input type="text" placeholder="Postal Code" required value={form.postalCode}
-              onChange={(e) => setForm({ ...form, postalCode: e.target.value })}
-              className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm outline-none" />
+            <div>
+              <input
+                type="text"
+                placeholder="City"
+                maxLength={50}
+                required
+                value={form.city}
+                onChange={(e) => handleFieldChange("city", e.target.value)}
+                className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${fieldErrors.city ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+              />
+              {fieldErrors.city && <p className="text-xs text-rose-600 mt-1">{fieldErrors.city}</p>}
+            </div>
+
+            <div>
+              <input
+                type="text"
+                placeholder="State"
+                maxLength={50}
+                required
+                value={form.state}
+                onChange={(e) => handleFieldChange("state", e.target.value)}
+                className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${fieldErrors.state ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+              />
+              {fieldErrors.state && <p className="text-xs text-rose-600 mt-1">{fieldErrors.state}</p>}
+            </div>
+
+            <div>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="PIN Code (6 digits)"
+                maxLength={6}
+                required
+                value={form.postalCode}
+                onChange={(e) => handleFieldChange("postalCode", e.target.value)}
+                className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${fieldErrors.postalCode ? "border-rose-400 ring-1 ring-rose-200" : "border-[var(--color-border)]"}`}
+              />
+              {fieldErrors.postalCode && <p className="text-xs text-rose-600 mt-1">{fieldErrors.postalCode}</p>}
+            </div>
           </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setShowForm(false)}
-              className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-xs">Cancel</button>
-            <button type="submit" disabled={createMutation.isPending}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-white">
+
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => { setShowForm(false); setSubmitError(null); }}
+              className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-xs hover:bg-[var(--color-bg-muted)] transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--color-primary-hover)] transition-colors disabled:opacity-50"
+            >
               {createMutation.isPending ? "Saving..." : "Save Address"}
             </button>
           </div>

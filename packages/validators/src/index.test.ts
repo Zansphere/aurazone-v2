@@ -41,12 +41,24 @@ describe('Validators', () => {
   describe('addressSchema', () => {
     it('should validate a full address', () => {
       const address = {
-        name: 'Home',
+        name: 'Home User',
         phone: '+919876543210',
         addressLine1: '123 Main St',
         city: 'Mumbai',
-        state: 'MH',
+        state: 'Maharashtra',
         postalCode: '400001'
+      };
+      expect(addressSchema.safeParse(address).success).toBe(true);
+    });
+
+    it('should accept 10-digit standard Indian mobile number', () => {
+      const address = {
+        name: 'Rahul Sharma',
+        phone: '9876543210',
+        addressLine1: 'Flat 402, Sunshine Heights',
+        city: 'Bengaluru',
+        state: 'Karnataka',
+        postalCode: '560001'
       };
       expect(addressSchema.safeParse(address).success).toBe(true);
     });
@@ -54,6 +66,64 @@ describe('Validators', () => {
     it('should reject missing required fields', () => {
       const invalidAddress = { name: 'Home' }; // Missing phone, addressLine1, etc.
       expect(addressSchema.safeParse(invalidAddress).success).toBe(false);
+    });
+
+    it('should reject excessively long or invalid phone numbers', () => {
+      const longPhone = {
+        name: 'Rahul Sharma',
+        phone: '987654321098765432109876543210',
+        addressLine1: '123 Main St',
+        city: 'Mumbai',
+        state: 'Maharashtra',
+        postalCode: '400001'
+      };
+      expect(addressSchema.safeParse(longPhone).success).toBe(false);
+
+      const invalidPhone = {
+        ...longPhone,
+        phone: 'abcdefghij',
+      };
+      expect(addressSchema.safeParse(invalidPhone).success).toBe(false);
+    });
+
+    it('should reject invalid PIN code formats', () => {
+      const invalidPin = {
+        name: 'Rahul Sharma',
+        phone: '9876543210',
+        addressLine1: '123 Main St',
+        city: 'Mumbai',
+        state: 'Maharashtra',
+        postalCode: '40000112345' // excessively long
+      };
+      expect(addressSchema.safeParse(invalidPin).success).toBe(false);
+
+      const letterPin = {
+        ...invalidPin,
+        postalCode: '4000AB'
+      };
+      expect(addressSchema.safeParse(letterPin).success).toBe(false);
+    });
+
+    it('should reject excessively long name or addressLine1', () => {
+      const longName = {
+        name: 'A'.repeat(80),
+        phone: '9876543210',
+        addressLine1: '123 Main St',
+        city: 'Mumbai',
+        state: 'Maharashtra',
+        postalCode: '400001'
+      };
+      expect(addressSchema.safeParse(longName).success).toBe(false);
+
+      const longAddr = {
+        name: 'Valid Name',
+        phone: '9876543210',
+        addressLine1: 'A'.repeat(150),
+        city: 'Mumbai',
+        state: 'Maharashtra',
+        postalCode: '400001'
+      };
+      expect(addressSchema.safeParse(longAddr).success).toBe(false);
     });
   });
 
@@ -79,6 +149,7 @@ describe('Validators', () => {
         storeId: '123e4567-e89b-12d3-a456-426614174000',
         categoryId: '123e4567-e89b-12d3-a456-426614174001',
         name: 'Test Product',
+        description: 'Test product description',
         variants: [
           {
             sku: 'SKU-001',
@@ -96,6 +167,7 @@ describe('Validators', () => {
         storeId: '123e4567-e89b-12d3-a456-426614174000',
         categoryId: '123e4567-e89b-12d3-a456-426614174001',
         name: 'Test Product',
+        description: 'Test product description',
         variants: [] // empty
       };
       expect(productSchema.safeParse(product).success).toBe(false);

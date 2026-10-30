@@ -8,6 +8,9 @@ export interface CartItem {
   productId: string;
   quantity: number;
   unitPrice: number;
+  isAvailable?: boolean;
+  availableStock?: number;
+  unavailableReason?: string | null;
   variant: {
     id: string;
     product: {
@@ -34,6 +37,8 @@ export interface Cart {
   items: CartItem[];
   itemCount: number;
   subtotal: number;
+  hasUnavailableItems?: boolean;
+  canCheckout?: boolean;
 }
 
 interface CartStore {

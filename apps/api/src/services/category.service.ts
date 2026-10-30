@@ -131,12 +131,22 @@ export async function createCategory(
 
   const slug = data.slug ?? slugify(data.name);
 
-  // Check uniqueness within store
+  // Check uniqueness within store (scoped to storeId)
   const existing = await prisma.category.findFirst({
-    where: { storeId: data.storeId, slug },
+    where: {
+      storeId: data.storeId,
+      deletedAt: null,
+      OR: [
+        { slug },
+        { name: { equals: data.name.trim(), mode: "insensitive" as const } },
+      ],
+    },
   });
   if (existing) {
-    throw Object.assign(new Error("Category slug already exists in this store"), { statusCode: 409 });
+    if (existing.slug === slug) {
+      throw Object.assign(new Error("Category slug already exists in this store"), { statusCode: 409 });
+    }
+    throw Object.assign(new Error("A category with this name already exists in this store"), { statusCode: 409 });
   }
 
   const category = await prisma.category.create({
@@ -187,12 +197,24 @@ export async function updateCategory(
     throw Object.assign(new Error("Category not found"), { statusCode: 404 });
   }
 
-  if (data.slug && data.slug !== category.slug) {
-    const slugTaken = await prisma.category.findFirst({
-      where: { storeId: category.storeId, slug: data.slug, id: { not: id } },
+  if ((data.slug && data.slug !== category.slug) || (data.name && data.name !== category.name)) {
+    const slugToCheck = data.slug ?? (data.name ? slugify(data.name) : undefined);
+    const duplicate = await prisma.category.findFirst({
+      where: {
+        storeId: category.storeId,
+        id: { not: id },
+        deletedAt: null,
+        OR: [
+          ...(slugToCheck ? [{ slug: slugToCheck }] : []),
+          ...(data.name ? [{ name: { equals: data.name.trim(), mode: "insensitive" as const } }] : []),
+        ],
+      },
     });
-    if (slugTaken) {
-      throw Object.assign(new Error("Category slug already exists in this store"), { statusCode: 409 });
+    if (duplicate) {
+      if (slugToCheck && duplicate.slug === slugToCheck) {
+        throw Object.assign(new Error("Category slug already exists in this store"), { statusCode: 409 });
+      }
+      throw Object.assign(new Error("A category with this name already exists in this store"), { statusCode: 409 });
     }
   }
 

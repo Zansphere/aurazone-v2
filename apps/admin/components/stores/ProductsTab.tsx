@@ -133,7 +133,7 @@ export default function ProductsTab({ storeId }: { storeId: string }) {
         {products.map((product) => {
           const mainVariant = product.variants?.[0];
           const imageUrl = mainVariant?.images?.[0]?.url;
-          const overallStock = product.variants?.reduce((sum, v) => sum + (v.inventory?.quantity ?? 0), 0) ?? 0;
+          const overallStock = product.variants?.reduce((sum, v) => sum + Math.max(0, (v.inventory?.quantity ?? 0) - (v.inventory?.reserved ?? 0)), 0) ?? 0;
           const variantCount = product._count?.variants ?? product.variants?.length ?? 1;
 
           return (
@@ -190,7 +190,7 @@ export default function ProductsTab({ storeId }: { storeId: string }) {
                     · {variantCount} {variantCount === 1 ? "variant" : "variants"}
                   </span>
                   {product.brand && (
-                    <span className="text-[10px] text-[var(--color-text-tertiary)]">· {product.brand}</span>
+                    <span className="text-[10px] text-[var(--color-text-tertiary)]">· <span>{product.brand}</span></span>
                   )}
                 </div>
               </div>
@@ -214,6 +214,7 @@ export default function ProductsTab({ storeId }: { storeId: string }) {
               {/* Status Toggle */}
               <button
                 onClick={() => toggleMutation.mutate({ id: product.id, isActive: !product.isActive })}
+                title={product.isActive ? "Click to deactivate" : "Click to activate"}
                 className={`flex h-5 w-9 items-center rounded-full px-0.5 transition-colors ${
                   product.isActive ? "bg-[var(--color-accent)]" : "bg-gray-300"
                 }`}

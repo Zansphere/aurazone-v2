@@ -115,6 +115,7 @@ export function Sidebar() {
         {/* Desktop Collapse toggle */}
         <button
           onClick={() => setCollapsed((c) => !c)}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           className="hidden md:flex absolute -right-3 top-16 h-6 w-6 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)] shadow-sm hover:bg-[var(--color-bg-muted)] transition-colors"
         >
           {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}

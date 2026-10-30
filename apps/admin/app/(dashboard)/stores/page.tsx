@@ -182,14 +182,12 @@ function StoreFormModal({
               <button
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, isActive: !f.isActive }))}
-                className={`flex h-6 w-11 items-center rounded-full px-0.5 transition-colors ${
-                  form.isActive ? "bg-[var(--color-accent)]" : "bg-[var(--color-bg-muted)] border border-[var(--color-border)]"
-                }`}
+                className={`flex h-6 w-11 items-center rounded-full px-0.5 transition-colors ${form.isActive ? "bg-[var(--color-accent)]" : "bg-[var(--color-bg-muted)] border border-[var(--color-border)]"
+                  }`}
               >
                 <span
-                  className={`h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                    form.isActive ? "translate-x-5" : "translate-x-0"
-                  }`}
+                  className={`h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${form.isActive ? "translate-x-5" : "translate-x-0"
+                    }`}
                 />
               </button>
             </div>
@@ -406,11 +404,10 @@ export default function StoresPage() {
             <button
               key={f}
               onClick={() => setFilterStatus(f)}
-              className={`rounded-[var(--radius-sm)] px-3 py-1.5 text-xs font-medium transition-colors capitalize ${
-                filterStatus === f
+              className={`rounded-[var(--radius-sm)] px-3 py-1.5 text-xs font-medium transition-colors capitalize ${filterStatus === f
                   ? "bg-[var(--color-primary)] text-white"
                   : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-muted)]"
-              }`}
+                }`}
             >
               {f}
             </button>
@@ -502,7 +499,7 @@ export default function StoresPage() {
                           <ArrowRight size={14} />
                         </Link>
                         <a
-                          href={`/store/${store.slug}`}
+                          href={`https://aurazone.shop/store/${store.slug}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-accent)] transition-colors border border-transparent hover:border-[var(--color-border)] hover:shadow-sm"

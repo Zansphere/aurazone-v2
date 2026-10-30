@@ -212,7 +212,7 @@ async function main() {
   const homeCats = [
     { name: 'Furniture', slug: 'furniture', sortOrder: 1, imageUrl: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?q=80&w=400' },
     { name: 'Decor', slug: 'decor', sortOrder: 2, imageUrl: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?q=80&w=400' },
-    { name: 'Lighting', slug: 'lighting', sortOrder: 3, imageUrl: 'https://images.unsplash.com/photo-1507473885765-e6ed057ab6fe?q=80&w=400' },
+    { name: 'Lighting', slug: 'lighting', sortOrder: 3, imageUrl: 'https://images.unsplash.com/photo-1760977817633-86910d0dfe3d?q=80&w=1081&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D' },
   ];
   catMap['home'] = [];
   for (const c of homeCats) {
@@ -224,7 +224,7 @@ async function main() {
   const elecCats = [
     { name: 'Earbuds & Headphones', slug: 'earbuds', sortOrder: 1, imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=400' },
     { name: 'Phone Cases', slug: 'phone-cases', sortOrder: 2, imageUrl: 'https://images.unsplash.com/photo-1601784551446-20c9e07cdbdb?q=80&w=400' },
-    { name: 'Smart Watches', slug: 'smart-watches', sortOrder: 3, imageUrl: 'https://images.unsplash.com/photo-1546868871-af0de0ae72be?q=80&w=400' },
+    { name: 'Smart Watches', slug: 'smart-watches', sortOrder: 3, imageUrl: 'https://images.unsplash.com/photo-1579586337278-3befd40fd17a?w=600&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D' },
   ];
   catMap['electronics'] = [];
   for (const c of elecCats) {
@@ -280,80 +280,92 @@ async function main() {
 
   const productSeeds: ProductSeed[] = [
     // Fashion T-Shirts
-    { name: 'Classic White T-Shirt', slug: 'classic-white-tshirt', description: 'A comfortable and versatile classic white t-shirt made from 100% premium cotton.', storeIdx: 0, catSlug: 'tshirts', brand: 'Aura Basics', isFeatured: true, tags: ['cotton', 'basic', 'summer'],
+    {
+      name: 'Classic White T-Shirt', slug: 'classic-white-tshirt', description: 'A comfortable and versatile classic white t-shirt made from 100% premium cotton.', storeIdx: 0, catSlug: 'tshirts', brand: 'Aura Basics', isFeatured: true, tags: ['cotton', 'basic', 'summer'],
       variants: [
         { sku: 'FASH-TS-W-M', price: 799, compareAtPrice: 999, qty: 100, attrs: [{ key: 'Size', value: 'M' }, { key: 'Color', value: '#FFFFFF' }], imageUrl: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=600', imageAlt: 'White T-Shirt M' },
         { sku: 'FASH-TS-W-L', price: 799, compareAtPrice: 999, qty: 75, attrs: [{ key: 'Size', value: 'L' }, { key: 'Color', value: '#FFFFFF' }], imageUrl: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=600', imageAlt: 'White T-Shirt L' },
         { sku: 'FASH-TS-B-M', price: 899, compareAtPrice: 1099, qty: 60, attrs: [{ key: 'Size', value: 'M' }, { key: 'Color', value: '#000000' }], imageUrl: 'https://images.unsplash.com/photo-1503341504253-dff4815485f1?q=80&w=600', imageAlt: 'Black T-Shirt M' },
       ],
     },
-    { name: 'Oversized Graphic Tee', slug: 'oversized-graphic-tee', description: 'Streetwear-inspired oversized tee with bold graphic print.', storeIdx: 0, catSlug: 'tshirts', brand: 'UrbanEdge', tags: ['graphic', 'streetwear', 'oversized'],
+    {
+      name: 'Oversized Graphic Tee', slug: 'oversized-graphic-tee', description: 'Streetwear-inspired oversized tee with bold graphic print.', storeIdx: 0, catSlug: 'tshirts', brand: 'UrbanEdge', tags: ['graphic', 'streetwear', 'oversized'],
       variants: [
         { sku: 'FASH-GT-G-L', price: 1299, compareAtPrice: 1599, qty: 45, attrs: [{ key: 'Size', value: 'L' }, { key: 'Color', value: '#4B5563' }], imageUrl: 'https://images.unsplash.com/photo-1576566588028-4147f3842f27?q=80&w=600', imageAlt: 'Graphic Tee' },
         { sku: 'FASH-GT-G-XL', price: 1299, compareAtPrice: 1599, qty: 30, attrs: [{ key: 'Size', value: 'XL' }, { key: 'Color', value: '#4B5563' }], imageUrl: 'https://images.unsplash.com/photo-1576566588028-4147f3842f27?q=80&w=600', imageAlt: 'Graphic Tee XL' },
       ],
     },
     // Fashion Jeans
-    { name: 'Slim Fit Denim Jeans', slug: 'slim-fit-denim-jeans', description: 'Premium quality slim fit blue denim jeans with stretch comfort.', storeIdx: 0, catSlug: 'jeans', brand: 'DenimCo', isFeatured: true, tags: ['denim', 'slim-fit', 'premium'],
+    {
+      name: 'Slim Fit Denim Jeans', slug: 'slim-fit-denim-jeans', description: 'Premium quality slim fit blue denim jeans with stretch comfort.', storeIdx: 0, catSlug: 'jeans', brand: 'DenimCo', isFeatured: true, tags: ['denim', 'slim-fit', 'premium'],
       variants: [
         { sku: 'FASH-JN-B-32', price: 1999, compareAtPrice: 2499, qty: 40, attrs: [{ key: 'Size', value: '32' }, { key: 'Color', value: '#1E3A5F' }], imageUrl: 'https://images.unsplash.com/photo-1541099649105-f69ad21f3246?q=80&w=600', imageAlt: 'Blue Jeans 32' },
         { sku: 'FASH-JN-B-34', price: 1999, compareAtPrice: 2499, qty: 25, attrs: [{ key: 'Size', value: '34' }, { key: 'Color', value: '#1E3A5F' }], imageUrl: 'https://images.unsplash.com/photo-1541099649105-f69ad21f3246?q=80&w=600', imageAlt: 'Blue Jeans 34' },
       ],
     },
     // Fashion Jackets
-    { name: 'Leather Biker Jacket', slug: 'leather-biker-jacket', description: 'Classic leather biker jacket with quilted lining and silver hardware.', storeIdx: 0, catSlug: 'jackets', brand: 'MotoEdge', isFeatured: true, tags: ['leather', 'biker', 'winter'],
+    {
+      name: 'Leather Biker Jacket', slug: 'leather-biker-jacket', description: 'Classic leather biker jacket with quilted lining and silver hardware.', storeIdx: 0, catSlug: 'jackets', brand: 'MotoEdge', isFeatured: true, tags: ['leather', 'biker', 'winter'],
       variants: [
         { sku: 'FASH-JK-BK-L', price: 5999, compareAtPrice: 7999, qty: 15, attrs: [{ key: 'Size', value: 'L' }, { key: 'Color', value: '#1C1C1C' }], imageUrl: 'https://images.unsplash.com/photo-1551028719-00167b16eac5?q=80&w=600', imageAlt: 'Leather Jacket' },
       ],
     },
     // Shoes Sneakers
-    { name: 'Pro Running Sneakers', slug: 'pro-running-sneakers', description: 'Lightweight and durable running shoes with responsive cushioning for everyday training.', storeIdx: 1, catSlug: 'sneakers', brand: 'AuraRun', isFeatured: true, tags: ['running', 'lightweight', 'sports'],
+    {
+      name: 'Pro Running Sneakers', slug: 'pro-running-sneakers', description: 'Lightweight and durable running shoes with responsive cushioning for everyday training.', storeIdx: 1, catSlug: 'sneakers', brand: 'AuraRun', isFeatured: true, tags: ['running', 'lightweight', 'sports'],
       variants: [
         { sku: 'SHOE-RN-B-9', price: 3499, compareAtPrice: 4999, qty: 20, attrs: [{ key: 'Size (UK)', value: '9' }, { key: 'Color', value: '#111827' }], imageUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=600', imageAlt: 'Running Sneakers 9' },
         { sku: 'SHOE-RN-B-10', price: 3499, compareAtPrice: 4999, qty: 18, attrs: [{ key: 'Size (UK)', value: '10' }, { key: 'Color', value: '#111827' }], imageUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=600', imageAlt: 'Running Sneakers 10' },
         { sku: 'SHOE-RN-W-9', price: 3499, compareAtPrice: 4999, qty: 12, attrs: [{ key: 'Size (UK)', value: '9' }, { key: 'Color', value: '#F3F4F6' }], imageUrl: 'https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?q=80&w=600', imageAlt: 'White Sneakers 9' },
       ],
     },
-    { name: 'Classic Leather Oxfords', slug: 'classic-leather-oxfords', description: 'Handcrafted leather oxford shoes for the modern gentleman.', storeIdx: 1, catSlug: 'formal-shoes', brand: 'Gentlemen\'s Co', tags: ['formal', 'leather', 'office'],
+    {
+      name: 'Classic Leather Oxfords', slug: 'classic-leather-oxfords', description: 'Handcrafted leather oxford shoes for the modern gentleman.', storeIdx: 1, catSlug: 'formal-shoes', brand: 'Gentlemen\'s Co', tags: ['formal', 'leather', 'office'],
       variants: [
         { sku: 'SHOE-OX-BR-8', price: 4599, compareAtPrice: 5999, qty: 10, attrs: [{ key: 'Size (UK)', value: '8' }, { key: 'Color', value: '#8B4513' }], imageUrl: 'https://images.unsplash.com/photo-1614252369475-531eba835eb1?q=80&w=600', imageAlt: 'Brown Oxfords' },
       ],
     },
     // Cosmetics
-    { name: 'Hydrating Face Serum', slug: 'hydrating-face-serum', description: 'Vitamin C + Hyaluronic Acid serum for glowing, hydrated skin.', storeIdx: 2, catSlug: 'skincare', brand: 'GlowLab', isFeatured: true, tags: ['serum', 'vitamin-c', 'hydration'],
+    {
+      name: 'Hydrating Face Serum', slug: 'hydrating-face-serum', description: 'Vitamin C + Hyaluronic Acid serum for glowing, hydrated skin.', storeIdx: 2, catSlug: 'skincare', brand: 'GlowLab', isFeatured: true, tags: ['serum', 'vitamin-c', 'hydration'],
       variants: [
         { sku: 'COS-SRM-30', price: 1299, compareAtPrice: 1799, qty: 80, attrs: [{ key: 'Size', value: '30ml' }], imageUrl: 'https://images.unsplash.com/photo-1556228578-0d85b1a4d571?q=80&w=600', imageAlt: 'Face Serum 30ml' },
         { sku: 'COS-SRM-50', price: 1899, compareAtPrice: 2499, qty: 45, attrs: [{ key: 'Size', value: '50ml' }], imageUrl: 'https://images.unsplash.com/photo-1556228578-0d85b1a4d571?q=80&w=600', imageAlt: 'Face Serum 50ml' },
       ],
     },
-    { name: 'Matte Lipstick Set', slug: 'matte-lipstick-set', description: 'Collection of 6 long-lasting matte lipstick shades.', storeIdx: 2, catSlug: 'makeup', brand: 'AuraGlam', tags: ['lipstick', 'matte', 'gift-set'],
+    {
+      name: 'Matte Lipstick Set', slug: 'matte-lipstick-set', description: 'Collection of 6 long-lasting matte lipstick shades.', storeIdx: 2, catSlug: 'makeup', brand: 'AuraGlam', tags: ['lipstick', 'matte', 'gift-set'],
       variants: [
         { sku: 'COS-LIP-6PK', price: 999, compareAtPrice: 1499, qty: 55, attrs: [{ key: 'Color', value: 'Assorted' }], imageUrl: 'https://images.unsplash.com/photo-1512496015851-a90fb38ba796?q=80&w=600', imageAlt: 'Lipstick Set' },
       ],
     },
     // Home
-    { name: 'Scandinavian Table Lamp', slug: 'scandinavian-table-lamp', description: 'Minimalist wooden table lamp with fabric shade. Perfect for bedside or desk.', storeIdx: 3, catSlug: 'lighting', brand: 'NordicHome', tags: ['lamp', 'minimalist', 'wooden'],
+    {
+      name: 'Scandinavian Table Lamp', slug: 'scandinavian-table-lamp', description: 'Minimalist wooden table lamp with fabric shade. Perfect for bedside or desk.', storeIdx: 3, catSlug: 'lighting', brand: 'NordicHome', tags: ['lamp', 'minimalist', 'wooden'],
       variants: [
-        { sku: 'HOME-LAMP-W', price: 2499, compareAtPrice: 3299, qty: 20, attrs: [{ key: 'Color', value: 'Warm White' }], imageUrl: 'https://images.unsplash.com/photo-1507473885765-e6ed057ab6fe?q=80&w=600', imageAlt: 'Table Lamp' },
+        { sku: 'HOME-LAMP-W', price: 2499, compareAtPrice: 3299, qty: 20, attrs: [{ key: 'Color', value: 'Warm White' }], imageUrl: 'https://images.unsplash.com/photo-1517991104123-1d56a6e81ed9?w=600&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D', imageAlt: 'Table Lamp' },
       ],
     },
-    { name: 'Velvet Throw Cushion', slug: 'velvet-throw-cushion', description: 'Luxurious velvet throw cushion covers — set of 2.', storeIdx: 3, catSlug: 'decor', brand: 'CozyNest', tags: ['cushion', 'velvet', 'decor'],
+    {
+      name: 'Velvet Throw Cushion', slug: 'velvet-throw-cushion', description: 'Luxurious velvet throw cushion covers — set of 2.', storeIdx: 3, catSlug: 'decor', brand: 'CozyNest', tags: ['cushion', 'velvet', 'decor'],
       variants: [
         { sku: 'HOME-CSH-EM', price: 899, compareAtPrice: 1199, qty: 65, attrs: [{ key: 'Color', value: 'Emerald' }], imageUrl: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?q=80&w=600', imageAlt: 'Velvet Cushion' },
         { sku: 'HOME-CSH-NV', price: 899, compareAtPrice: 1199, qty: 50, attrs: [{ key: 'Color', value: 'Navy' }], imageUrl: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?q=80&w=600', imageAlt: 'Navy Cushion' },
       ],
     },
     // Electronics
-    { name: 'AuraBuds Pro', slug: 'aurabuds-pro', description: 'True wireless earbuds with active noise cancellation, 30h battery life.', storeIdx: 4, catSlug: 'earbuds', brand: 'AuraAudio', isFeatured: true, tags: ['tws', 'anc', 'bluetooth'],
+    {
+      name: 'AuraBuds Pro', slug: 'aurabuds-pro', description: 'True wireless earbuds with active noise cancellation, 30h battery life.', storeIdx: 4, catSlug: 'earbuds', brand: 'AuraAudio', isFeatured: true, tags: ['tws', 'anc', 'bluetooth'],
       variants: [
         { sku: 'ELEC-BUD-BK', price: 2999, compareAtPrice: 4499, qty: 35, attrs: [{ key: 'Color', value: 'Black' }], imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=600', imageAlt: 'AuraBuds Black' },
         { sku: 'ELEC-BUD-WH', price: 2999, compareAtPrice: 4499, qty: 28, attrs: [{ key: 'Color', value: 'White' }], imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=600', imageAlt: 'AuraBuds White' },
       ],
     },
-    { name: 'AuraWatch Fit', slug: 'aurawatch-fit', description: 'Fitness smartwatch with heart rate, SpO2, GPS, and 14-day battery.', storeIdx: 4, catSlug: 'smart-watches', brand: 'AuraTech', isFeatured: true, tags: ['smartwatch', 'fitness', 'gps'],
+    {
+      name: 'AuraWatch Fit', slug: 'aurawatch-fit', description: 'Fitness smartwatch with heart rate, SpO2, GPS, and 14-day battery.', storeIdx: 4, catSlug: 'smart-watches', brand: 'AuraTech', isFeatured: true, tags: ['smartwatch', 'fitness', 'gps'],
       variants: [
-        { sku: 'ELEC-WCH-BK', price: 4999, compareAtPrice: 6999, qty: 22, attrs: [{ key: 'Color', value: 'Black' }], imageUrl: 'https://images.unsplash.com/photo-1546868871-af0de0ae72be?q=80&w=600', imageAlt: 'AuraWatch Black' },
-        { sku: 'ELEC-WCH-BL', price: 4999, compareAtPrice: 6999, qty: 15, attrs: [{ key: 'Color', value: 'Blue' }], imageUrl: 'https://images.unsplash.com/photo-1546868871-af0de0ae72be?q=80&w=600', imageAlt: 'AuraWatch Blue' },
+        { sku: 'ELEC-WCH-BK', price: 4999, compareAtPrice: 6999, qty: 22, attrs: [{ key: 'Color', value: 'Black' }], imageUrl: 'https://images.unsplash.com/photo-1760977817633-86910d0dfe3d?q=80&w=1081&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D', imageAlt: 'AuraWatch Black' },
+        { sku: 'ELEC-WCH-BL', price: 4999, compareAtPrice: 6999, qty: 15, attrs: [{ key: 'Color', value: 'Blue' }], imageUrl: 'https://images.unsplash.com/photo-1760977817633-86910d0dfe3d?q=80&w=1081&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D', imageAlt: 'AuraWatch Blue' },
       ],
     },
   ];
@@ -621,7 +633,7 @@ async function main() {
     const product = createdProducts[i];
     // Add 1 to 4 reviews per product
     const numReviews = 1 + Math.floor(Math.random() * 4);
-    
+
     // Pick random customers
     const shuffledCustomers = [...customers].sort(() => 0.5 - Math.random());
     const selectedCustomers = shuffledCustomers.slice(0, numReviews);
@@ -629,7 +641,7 @@ async function main() {
     for (const customer of selectedCustomers) {
       const rating = 3 + Math.floor(Math.random() * 3); // 3, 4, or 5 stars
       const body = reviewComments[Math.floor(Math.random() * reviewComments.length)];
-      
+
       await prisma.productReview.create({
         data: {
           productId: product.id,

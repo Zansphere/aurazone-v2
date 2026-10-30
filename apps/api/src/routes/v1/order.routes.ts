@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { parsePagination, toPaise, toRupees, calcDiscountPaise } from "@aurazone/utils";
 import { prisma } from "@aurazone/database";
+import { addressSchema } from "@aurazone/validators";
 import { optionalAuth, authenticate } from "../../middleware/auth.js";
 import { sendSuccess, sendError, sendPaginated, handleRouteError } from "../../middleware/response.js";
 import * as orderService from "../../services/order.service.js";
@@ -77,13 +78,24 @@ const orderRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/coupons/validate", { preHandler: [optionalAuth] }, async (request, reply) => {
-    const { code, subtotal, items, guestEmail } = request.body as {
+    const { code, subtotal, items, guestEmail } = (request.body as {
       code: string;
       subtotal: number;
       items?: Array<{ productId: string; variantId?: string; price: number; quantity: number }>;
       guestEmail?: string;
-    };
-    if (!code || subtotal === undefined) return sendError(reply, "Coupon code and subtotal are required", 400);
+    }) || {};
+
+    if (
+      !code ||
+      typeof code !== "string" ||
+      !code.trim() ||
+      subtotal === undefined ||
+      typeof subtotal !== "number" ||
+      isNaN(subtotal) ||
+      subtotal < 0
+    ) {
+      return sendError(reply, "Valid coupon code and non-negative numeric subtotal are required", 400);
+    }
 
     const subtotalPaise = toPaise(subtotal);
     const now = new Date();
@@ -293,7 +305,7 @@ const orderRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/", { preHandler: [optionalAuth] }, async (request, reply) => {
-    const { addressId, address, paymentMethod, couponCode, guestEmail } = request.body as {
+    const { addressId, address, paymentMethod, couponCode, guestEmail } = (request.body as {
       addressId?: string;
       address?: {
         name: string; phone: string; addressLine1: string; addressLine2?: string;
@@ -302,10 +314,18 @@ const orderRoutes: FastifyPluginAsync = async (fastify) => {
       paymentMethod: "RAZORPAY" | "COD";
       couponCode?: string;
       guestEmail?: string;
-    };
+    }) || {};
 
     if (!addressId && !address) return sendError(reply, "addressId or address is required", 400);
-    if (!paymentMethod) return sendError(reply, "paymentMethod is required", 400);
+    if (address) {
+      const parsed = addressSchema.safeParse(address);
+      if (!parsed.success) {
+        return sendError(reply, parsed.error.issues[0]?.message || "Invalid address format", 400);
+      }
+    }
+    if (!paymentMethod || !["RAZORPAY", "COD"].includes(paymentMethod)) {
+      return sendError(reply, "Valid paymentMethod ('RAZORPAY' or 'COD') is required", 400);
+    }
 
     const userId = request.user?.userId;
     const sessionId = request.headers["x-guest-session"] as string | undefined;
@@ -331,11 +351,82 @@ const orderRoutes: FastifyPluginAsync = async (fastify) => {
             return { statusCode: 201, body: order };
           }
         );
-        return reply.status(result.statusCode).send({ status: "success", data: result.body });
+        return sendSuccess(reply, result.body, result.statusCode);
       }
 
       const order = await orderService.createOrderFromCart(
         userId, sessionId, addressId ?? address!, paymentMethod, guestEmail, couponCode
+      );
+      return sendSuccess(reply, order, 201);
+    } catch (err: unknown) {
+      return handleRouteError(reply, err);
+    }
+  });
+
+  fastify.post("/direct", { preHandler: [optionalAuth] }, async (request, reply) => {
+    const body = (request.body as {
+      variantId?: string;
+      quantity?: number;
+      addressId?: string;
+      address?: {
+        name: string; phone: string; addressLine1: string; addressLine2?: string;
+        city: string; state: string; postalCode: string; country: string;
+      };
+      paymentMethod?: "RAZORPAY" | "COD";
+      couponCode?: string;
+      guestEmail?: string;
+    }) || {};
+
+    const { variantId, quantity = 1, addressId, address, paymentMethod, couponCode, guestEmail } = body;
+
+    if (!variantId || typeof variantId !== "string") {
+      return sendError(reply, "variantId is required", 400);
+    }
+    if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1) {
+      return sendError(reply, "quantity must be a positive integer", 400);
+    }
+    if (!addressId && !address) {
+      return sendError(reply, "addressId or address is required", 400);
+    }
+    if (address) {
+      const parsedAddress = addressSchema.safeParse(address);
+      if (!parsedAddress.success) {
+        return sendError(reply, parsedAddress.error.issues[0]?.message || "Invalid address format", 400);
+      }
+    }
+    if (!paymentMethod || !["RAZORPAY", "COD"].includes(paymentMethod)) {
+      return sendError(reply, "Valid paymentMethod ('RAZORPAY' or 'COD') is required", 400);
+    }
+
+    const userId = request.user?.userId;
+    const sessionId = request.headers["x-guest-session"] as string | undefined;
+
+    if (!userId && !sessionId) return sendError(reply, "Unauthorized", 401);
+
+    const idempotencyKey = (request.headers["idempotency-key"] || request.headers["x-idempotency-key"]) as string | undefined;
+
+    try {
+      if (idempotencyKey) {
+        const result = await withIdempotency(
+          {
+            key: idempotencyKey,
+            scope: "DIRECT_CHECKOUT",
+            userId,
+            sessionId,
+            payload: request.body,
+          },
+          async () => {
+            const order = await orderService.createDirectOrder(
+              userId, sessionId, variantId, quantity, addressId ?? address!, paymentMethod, guestEmail, couponCode
+            );
+            return { statusCode: 201, body: order };
+          }
+        );
+        return sendSuccess(reply, result.body, result.statusCode);
+      }
+
+      const order = await orderService.createDirectOrder(
+        userId, sessionId, variantId, quantity, addressId ?? address!, paymentMethod, guestEmail, couponCode
       );
       return sendSuccess(reply, order, 201);
     } catch (err: unknown) {

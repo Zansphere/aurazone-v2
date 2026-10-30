@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import {
   Plus, Trash2, Edit2, FolderTree, ChevronDown, ChevronRight,
-  CheckCircle, XCircle, X,
+  CheckCircle, XCircle, X, AlertCircle,
 } from "lucide-react";
 
 interface Category {
@@ -27,6 +27,7 @@ export default function CategoriesTab({ storeId }: { storeId: string }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [localError, setLocalError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "", slug: "", description: "", parentId: "" as string | null, isActive: true,
   });
@@ -65,11 +66,17 @@ export default function CategoriesTab({ storeId }: { storeId: string }) {
   const resetForm = () => {
     setShowForm(false);
     setEditingId(null);
+    setLocalError(null);
+    createMutation.reset();
+    updateMutation.reset();
     setForm({ name: "", slug: "", description: "", parentId: null, isActive: true });
   };
 
   const startEdit = (cat: Category) => {
     setEditingId(cat.id);
+    setLocalError(null);
+    createMutation.reset();
+    updateMutation.reset();
     setShowForm(true);
     setForm({
       name: cat.name, slug: cat.slug, description: cat.description ?? "",
@@ -79,20 +86,48 @@ export default function CategoriesTab({ storeId }: { storeId: string }) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setLocalError(null);
+
+    const trimmedName = form.name.trim();
+    const resolvedSlug = (form.slug || slugify(trimmedName)).trim().toLowerCase();
+
+    // Duplicate check scoped strictly to THIS store
+    const duplicate = categories.find(
+      (c) =>
+        c.id !== editingId &&
+        (c.name.trim().toLowerCase() === trimmedName.toLowerCase() ||
+          c.slug.trim().toLowerCase() === resolvedSlug)
+    );
+
+    if (duplicate) {
+      if (duplicate.name.trim().toLowerCase() === trimmedName.toLowerCase()) {
+        setLocalError(`A category named "${trimmedName}" already exists in this store.`);
+      } else {
+        setLocalError(`A category with slug "${resolvedSlug}" already exists in this store.`);
+      }
+      return;
+    }
+
     const payload = {
       storeId,
-      name: form.name,
-      slug: form.slug,
+      name: trimmedName,
+      slug: resolvedSlug,
       description: form.description || undefined,
       parentId: form.parentId || null,
       isActive: form.isActive,
     };
+
     if (editingId) {
       updateMutation.mutate({ id: editingId, data: payload });
     } else {
       createMutation.mutate(payload);
     }
   };
+
+  const activeError =
+    localError ||
+    (createMutation.error as any)?.message ||
+    (updateMutation.error as any)?.message;
 
   const toggleExpand = (id: string) => {
     setExpandedIds(prev => {
@@ -132,24 +167,40 @@ export default function CategoriesTab({ storeId }: { storeId: string }) {
               <X size={14} />
             </button>
           </div>
+
+          {activeError && (
+            <div className="flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/20 p-2.5 text-xs text-red-600 dark:text-red-400">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>{activeError}</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="form-label">Name</label>
+              <label className="form-label" htmlFor="cat-name">Name</label>
               <input
+                id="cat-name"
                 type="text" className="form-input" required
                 value={form.name}
-                onChange={(e) => setForm(f => ({
-                  ...f, name: e.target.value,
-                  slug: editingId ? f.slug : slugify(e.target.value),
-                }))}
+                onChange={(e) => {
+                  setLocalError(null);
+                  setForm(f => ({
+                    ...f, name: e.target.value,
+                    slug: editingId ? f.slug : slugify(e.target.value),
+                  }));
+                }}
               />
             </div>
             <div>
-              <label className="form-label">Slug</label>
+              <label className="form-label" htmlFor="cat-slug">Slug</label>
               <input
+                id="cat-slug"
                 type="text" className="form-input font-mono text-xs"
                 value={form.slug}
-                onChange={(e) => setForm(f => ({ ...f, slug: e.target.value }))}
+                onChange={(e) => {
+                  setLocalError(null);
+                  setForm(f => ({ ...f, slug: e.target.value }));
+                }}
               />
             </div>
           </div>

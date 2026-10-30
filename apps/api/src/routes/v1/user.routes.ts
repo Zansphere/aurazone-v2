@@ -91,9 +91,14 @@ const userRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post("/addresses", async (request, reply) => {
     const parsed = addressSchema.safeParse(request.body);
-    if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
+    if (!parsed.success) {
+      return sendError(reply, parsed.error.issues[0]?.message || "Invalid address format", 400);
+    }
 
-    if (parsed.data.isDefault) {
+    const existingCount = await prisma.address.count({ where: { userId: request.user!.userId } });
+    const isDefault = parsed.data.isDefault || existingCount === 0;
+
+    if (isDefault) {
       await prisma.address.updateMany({
         where: { userId: request.user!.userId, isDefault: true },
         data: { isDefault: false },
@@ -101,7 +106,7 @@ const userRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const address = await prisma.address.create({
-      data: { userId: request.user!.userId, ...parsed.data },
+      data: { userId: request.user!.userId, ...parsed.data, isDefault },
     });
     return sendSuccess(reply, address, 201);
   });
@@ -109,7 +114,9 @@ const userRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.put("/addresses/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const parsed = addressSchema.partial().safeParse(request.body);
-    if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
+    if (!parsed.success) {
+      return sendError(reply, parsed.error.issues[0]?.message || "Invalid address format", 400);
+    }
 
     const address = await prisma.address.findFirst({ where: { id, userId: request.user!.userId } });
     if (!address) return sendError(reply, "Address not found", 404);

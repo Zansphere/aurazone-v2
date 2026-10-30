@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
+import crypto from "crypto";
 import { addToCartSchema, updateCartItemSchema } from "@aurazone/validators";
 import { toRupees, calcItemSubtotalPaise } from "@aurazone/utils";
 import { prisma } from "@aurazone/database";
@@ -9,33 +10,89 @@ import { holdInventory, releaseInventory } from "../../services/inventory.servic
 const cartRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", optionalAuth);
 
-  const getCartWhere = (request: any) => {
-    const userId = request.user?.userId;
-    const sessionId = request.headers["x-guest-session"];
-    if (!userId && !sessionId) return null;
-    
-    return userId 
-      ? { userId, status: "ACTIVE" as const }
-      : { sessionId, status: "ACTIVE" as const };
+  const resolveGuestSession = async (request: any, reply?: any) => {
+    const rawSessionId = request.headers["x-guest-session"] as string | undefined;
+
+    if (rawSessionId) {
+      // 1. Check if GuestSession exists by ID (UUID) or sessionId (token)
+      const existing = await prisma.guestSession.findFirst({
+        where: {
+          OR: [{ id: rawSessionId }, { sessionId: rawSessionId }],
+        },
+      });
+
+      if (existing) {
+        return existing;
+      }
+
+      // 2. If valid UUID, preserve it so client-cached localStorage guest_session_id remains valid
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSessionId);
+      const newSession = await prisma.guestSession.create({
+        data: {
+          ...(isUuid ? { id: rawSessionId } : {}),
+          sessionId: crypto.randomBytes(32).toString("hex"),
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+        },
+      });
+
+      if (reply) {
+        reply.header("x-guest-session", newSession.id);
+      }
+      return newSession;
+    }
+
+    // 3. No session provided: create fresh session
+    const newSession = await prisma.guestSession.create({
+      data: {
+        sessionId: crypto.randomBytes(32).toString("hex"),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    if (reply) {
+      reply.header("x-guest-session", newSession.id);
+    }
+    return newSession;
   };
 
-  const getCartCreateData = (request: any) => {
+  const getOrCreateActiveCart = async (request: any, reply?: any) => {
     const userId = request.user?.userId;
-    const sessionId = request.headers["x-guest-session"];
-    if (!userId && !sessionId) return null;
-    
-    return userId ? { userId } : { sessionId };
+    if (userId) {
+      let cart = await prisma.cart.findFirst({
+        where: { userId, status: "ACTIVE" },
+      });
+      if (!cart) {
+        cart = await prisma.cart.create({
+          data: { userId },
+        });
+      }
+      return cart;
+    }
+
+    const session = await resolveGuestSession(request, reply);
+    let cart = await prisma.cart.findFirst({
+      where: { sessionId: session.id, status: "ACTIVE" },
+    });
+    if (!cart) {
+      cart = await prisma.cart.create({
+        data: { sessionId: session.id },
+      });
+    }
+    return cart;
   };
 
   fastify.get("/", async (request, reply) => {
     try {
-      const where = getCartWhere(request);
-      if (!where) {
-        return sendSuccess(reply, { items: [], itemCount: 0, subtotal: 0 });
+      const userId = request.user?.userId;
+      const rawSessionId = request.headers["x-guest-session"] as string | undefined;
+
+      if (!userId && !rawSessionId) {
+        return sendSuccess(reply, { items: [], itemCount: 0, subtotal: 0, hasUnavailableItems: false, canCheckout: false });
       }
 
-      let cart = await prisma.cart.findFirst({
-        where,
+      const activeCart = await getOrCreateActiveCart(request, reply);
+      const cart = await prisma.cart.findUnique({
+        where: { id: activeCart.id },
         include: {
           items: {
             include: {
@@ -43,7 +100,11 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
                 include: {
                   product: {
                     select: {
-                      id: true, name: true, slug: true,
+                      id: true,
+                      name: true,
+                      slug: true,
+                      isActive: true,
+                      deletedAt: true,
                       store: { select: { id: true, name: true, slug: true } },
                     },
                   },
@@ -59,33 +120,70 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
       });
 
       if (!cart) {
-        const createData = getCartCreateData(request);
-        if (!createData) {
-          return sendSuccess(reply, { items: [], itemCount: 0, subtotal: 0 });
+        return sendSuccess(reply, { items: [], itemCount: 0, subtotal: 0, hasUnavailableItems: false, canCheckout: false });
+      }
+
+      // Check for deleted or inactive products/variants and prune them
+      const validItems: typeof cart.items = [];
+      const staleItemIds: string[] = [];
+
+      for (const item of cart.items) {
+        const isDeleted =
+          !item.variant ||
+          item.variant.deletedAt !== null ||
+          !item.variant.product ||
+          item.variant.product.deletedAt !== null;
+        const isInactive = !item.variant?.isAvailable || !item.variant?.product?.isActive;
+
+        if (isDeleted || isInactive) {
+          staleItemIds.push(item.id);
+          try {
+            await releaseInventory(item.variantId, item.quantity, item.id, "Auto-pruned deleted/inactive cart item");
+          } catch {
+            // Ignore release failure for orphaned variants
+          }
+        } else {
+          validItems.push(item);
         }
-        cart = await prisma.cart.create({
-          data: createData,
-          include: { items: { include: { variant: true } } },
-        }) as unknown as typeof cart;
       }
 
-      if (!cart) {
-        return sendSuccess(reply, { items: [], itemCount: 0, subtotal: 0 });
+      if (staleItemIds.length > 0) {
+        await prisma.cartItem.deleteMany({
+          where: { id: { in: staleItemIds } },
+        });
       }
 
-      const subtotalPaise = cart.items.reduce(
-        (sum, item) => sum + calcItemSubtotalPaise(item.unitPrice, item.quantity),
-        0
-      );
+      // Enrich items with live stock availability
+      const enrichedItems = validItems.map((item) => {
+        const availableStock = item.variant?.inventory?.quantity ?? 0;
+        const isStockSufficient = availableStock >= item.quantity;
+        return {
+          ...item,
+          isAvailable: isStockSufficient,
+          availableStock,
+          unavailableReason: !isStockSufficient
+            ? `Only ${availableStock} in stock (requested ${item.quantity})`
+            : null,
+        };
+      });
+
+      const subtotalPaise = enrichedItems
+        .filter((item) => item.isAvailable)
+        .reduce((sum, item) => sum + calcItemSubtotalPaise(item.unitPrice, item.quantity), 0);
       const subtotal = toRupees(subtotalPaise);
 
-      const uniqueProductIds = new Set(cart.items.map((item) => item.productId));
+      const uniqueProductIds = new Set(enrichedItems.map((item) => item.productId));
+      const hasUnavailableItems = enrichedItems.some((item) => !item.isAvailable);
+      const canCheckout = enrichedItems.length > 0 && !hasUnavailableItems;
 
       return sendSuccess(reply, {
-        ...cart!,
+        ...cart,
+        items: enrichedItems,
         itemCount: uniqueProductIds.size,
-        totalQuantity: cart.items.reduce((sum, item) => sum + item.quantity, 0),
+        totalQuantity: enrichedItems.reduce((sum, item) => sum + item.quantity, 0),
         subtotal,
+        hasUnavailableItems,
+        canCheckout,
       });
     } catch (e: unknown) {
       return handleRouteError(reply, e);
@@ -97,25 +195,26 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
       const parsed = addToCartSchema.safeParse(request.body);
       if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
 
-      const where = getCartWhere(request);
-      const createData = getCartCreateData(request);
-      if (!where || !createData) {
-        return sendError(reply, "Please create a session first or log in", 400);
-      }
-
       const variant = await prisma.productVariant.findUnique({
         where: { id: parsed.data.variantId },
-        include: { product: { select: { id: true, isActive: true } }, inventory: true },
+        include: {
+          product: { select: { id: true, isActive: true, deletedAt: true } },
+          inventory: true,
+        },
       });
 
-      if (!variant || !variant.isAvailable || !variant.product.isActive) {
-        return sendError(reply, "Product variant not available", 400);
+      if (
+        !variant ||
+        variant.deletedAt !== null ||
+        !variant.isAvailable ||
+        !variant.product ||
+        variant.product.deletedAt !== null ||
+        !variant.product.isActive
+      ) {
+        return sendError(reply, "Product variant is no longer available", 400);
       }
 
-      let cart = await prisma.cart.findFirst({ where });
-      if (!cart) {
-        cart = await prisma.cart.create({ data: createData });
-      }
+      const cart = await getOrCreateActiveCart(request, reply);
 
       const stock = (variant.inventory?.quantity ?? 0) - (variant.inventory?.reserved ?? 0);
       const existing = await prisma.cartItem.findFirst({
@@ -160,18 +259,46 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
 
       const item = await prisma.cartItem.findUnique({
         where: { id: itemId },
-        include: { cart: true, variant: { include: { inventory: true } } },
+        include: {
+          cart: true,
+          variant: {
+            include: {
+              inventory: true,
+              product: { select: { id: true, isActive: true, deletedAt: true } },
+            },
+          },
+        },
       });
 
       const userId = request.user?.userId;
-      const sessionId = request.headers["x-guest-session"];
-      
-      const isOwner = userId 
-        ? item?.cart.userId === userId
-        : item?.cart.sessionId === sessionId;
+      const rawSessionId = request.headers["x-guest-session"] as string | undefined;
+
+      let isOwner = false;
+      if (userId) {
+        isOwner = item?.cart.userId === userId;
+      } else if (rawSessionId && item) {
+        if (item.cart.sessionId === rawSessionId) {
+          isOwner = true;
+        } else {
+          const guestSession = await prisma.guestSession.findFirst({
+            where: { OR: [{ id: rawSessionId }, { sessionId: rawSessionId }] },
+          });
+          isOwner = Boolean(guestSession && item.cart.sessionId === guestSession.id);
+        }
+      }
 
       if (!item || !isOwner) {
         return sendError(reply, "Cart item not found", 404);
+      }
+
+      if (
+        item.variant.deletedAt !== null ||
+        !item.variant.isAvailable ||
+        !item.variant.product ||
+        item.variant.product.deletedAt !== null ||
+        !item.variant.product.isActive
+      ) {
+        return sendError(reply, "Product variant is no longer available", 400);
       }
 
       const stock = (item.variant.inventory?.quantity ?? 0) - (item.variant.inventory?.reserved ?? 0);
@@ -202,11 +329,21 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
       });
       
       const userId = request.user?.userId;
-      const sessionId = request.headers["x-guest-session"];
-      
-      const isOwner = userId 
-        ? item?.cart.userId === userId
-        : item?.cart.sessionId === sessionId;
+      const rawSessionId = request.headers["x-guest-session"] as string | undefined;
+
+      let isOwner = false;
+      if (userId) {
+        isOwner = item?.cart.userId === userId;
+      } else if (rawSessionId && item) {
+        if (item.cart.sessionId === rawSessionId) {
+          isOwner = true;
+        } else {
+          const guestSession = await prisma.guestSession.findFirst({
+            where: { OR: [{ id: rawSessionId }, { sessionId: rawSessionId }] },
+          });
+          isOwner = Boolean(guestSession && item.cart.sessionId === guestSession.id);
+        }
+      }
 
       if (!item || !isOwner) {
         return sendError(reply, "Cart item not found", 404);
@@ -222,11 +359,14 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.delete("/", async (request, reply) => {
     try {
-      const where = getCartWhere(request);
-      if (!where) {
+      const userId = request.user?.userId;
+      const rawSessionId = request.headers["x-guest-session"] as string | undefined;
+      if (!userId && !rawSessionId) {
         return sendSuccess(reply, { message: "Cart cleared" });
       }
-      const cart = await prisma.cart.findFirst({ where, include: { items: true } });
+
+      const activeCart = await getOrCreateActiveCart(request, reply);
+      const cart = await prisma.cart.findUnique({ where: { id: activeCart.id }, include: { items: true } });
       if (cart) {
         for (const item of cart.items) {
           await releaseInventory(item.variantId, item.quantity, item.id, `Cart cleared for ${cart.id}`);

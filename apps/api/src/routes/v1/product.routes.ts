@@ -82,10 +82,17 @@ const productRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── POST /:slug/reviews — Add a review for a product ─────────
   fastify.post("/:slug/reviews", { preHandler: [authenticate] }, async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const body = request.body as { rating: number; body?: string };
+    const body = (request.body as { rating?: number; body?: string }) || {};
+
+    if (typeof body.rating !== "number" || isNaN(body.rating) || body.rating < 1 || body.rating > 5 || !Number.isInteger(body.rating)) {
+      return sendError(reply, "Rating must be an integer between 1 and 5", 400);
+    }
     
     try {
-      const review = await productService.addProductReview(slug, request.user!.userId, body);
+      const review = await productService.addProductReview(slug, request.user!.userId, {
+        rating: body.rating,
+        body: body.body,
+      });
       return sendSuccess(reply, review, 201);
     } catch (err: unknown) {
       return handleRouteError(reply, err);

@@ -72,7 +72,16 @@ export async function signupWithEmail(
   deviceInfo?: string,
   ipAddress?: string
 ): Promise<{ user: User; accessToken: string; refreshToken: string; verificationToken: string }> {
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const normalizedEmail = (email ?? "").toLowerCase().trim();
+  if (!normalizedEmail) {
+    throw Object.assign(new Error("Email is required"), { statusCode: 400 });
+  }
+
+  const existing = await prisma.user.findFirst({
+    where: {
+      email: { equals: normalizedEmail, mode: "insensitive" },
+    },
+  });
   if (existing) {
     throw Object.assign(new Error("Email already registered"), { statusCode: 409 });
   }
@@ -83,10 +92,12 @@ export async function signupWithEmail(
   const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
   const user = await prisma.user.create({
     data: {
-      email,
+      email: normalizedEmail,
       password: hashedPassword,
-      fullName: fullName ?? null,
+      fullName: fullName?.trim() || null,
       role: "CUSTOMER",
+      isActive: true,
+      isGuest: false,
       isEmailVerified: null,
       emailVerificationToken: hashedVerificationToken,
     },
@@ -120,7 +131,16 @@ export async function loginWithEmail(
   deviceInfo?: string,
   ipAddress?: string
 ): Promise<{ user: User; accessToken: string; refreshToken: string }> {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const normalizedEmail = (email ?? "").toLowerCase().trim();
+  if (!normalizedEmail) {
+    throw Object.assign(new Error("Invalid email or password"), { statusCode: 401 });
+  }
+
+  const user = await prisma.user.findFirst({
+    where: {
+      email: { equals: normalizedEmail, mode: "insensitive" },
+    },
+  });
   if (!user || !user.password) {
     throw Object.assign(new Error("Invalid email or password"), { statusCode: 401 });
   }
@@ -129,6 +149,12 @@ export async function loginWithEmail(
   if (!valid) {
     throw Object.assign(new Error("Invalid email or password"), { statusCode: 401 });
   }
+
+  // Update last login timestamp
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { lastLoginAt: new Date() },
+  });
 
   await mergeGuestCart(user.id, guestSessionId);
   await mergeGuestOrders(user.id, guestSessionId);
@@ -149,7 +175,11 @@ export async function loginWithEmail(
 }
 
 export async function verifyEmail(token: string): Promise<User> {
-  const hashedToken = hashToken(token);
+  if (!token || typeof token !== "string") {
+    throw Object.assign(new Error("Invalid or expired verification token"), { statusCode: 400 });
+  }
+
+  const hashedToken = hashToken(token.trim());
   const user = await prisma.user.findFirst({
     where: { emailVerificationToken: hashedToken },
   });
@@ -162,6 +192,7 @@ export async function verifyEmail(token: string): Promise<User> {
     where: { id: user.id },
     data: {
       isEmailVerified: new Date(),
+      isActive: true,
       emailVerificationToken: null,
     },
   });
@@ -196,7 +227,11 @@ export async function getCurrentUser(userId: string) {
 }
 
 export async function refreshAccessToken(refreshToken: string) {
-  const hash = hashToken(refreshToken);
+  if (!refreshToken || typeof refreshToken !== "string") {
+    throw Object.assign(new Error("Invalid or expired refresh token"), { statusCode: 401 });
+  }
+
+  const hash = hashToken(refreshToken.trim());
   const session = await prisma.userSession.findFirst({
     where: { refreshTokenHash: hash, expiresAt: { gt: new Date() } },
   });
@@ -222,13 +257,20 @@ export async function refreshAccessToken(refreshToken: string) {
 }
 
 export async function logout(refreshToken: string): Promise<void> {
-  const hash = hashToken(refreshToken);
+  if (!refreshToken) return;
+  const hash = hashToken(refreshToken.trim());
   await prisma.userSession.deleteMany({ where: { refreshTokenHash: hash } });
 }
 
 export async function createPasswordResetToken(email: string): Promise<string> {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const normalizedEmail = (email ?? "").toLowerCase().trim();
+  if (!normalizedEmail) return "";
+
+  const user = await prisma.user.findFirst({
+    where: { email: { equals: normalizedEmail, mode: "insensitive" } },
+  });
   if (!user) return "";
+
   const token = crypto.randomBytes(32).toString("hex");
   await prisma.user.update({
     where: { id: user.id },
@@ -241,7 +283,11 @@ export async function createPasswordResetToken(email: string): Promise<string> {
 }
 
 export async function resetPassword(token: string, newPassword: string): Promise<void> {
-  const hashedToken = hashToken(token);
+  if (!token || typeof token !== "string") {
+    throw Object.assign(new Error("Invalid or expired reset token"), { statusCode: 400 });
+  }
+
+  const hashedToken = hashToken(token.trim());
   const user = await prisma.user.findFirst({
     where: { passwordResetToken: hashedToken, passwordResetExpires: { gt: new Date() } },
   });

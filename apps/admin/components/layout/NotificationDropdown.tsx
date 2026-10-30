@@ -160,6 +160,7 @@ export function NotificationDropdown() {
                 type="button"
                 onClick={() => markAllReadMutation.mutate()}
                 disabled={markAllReadMutation.isPending}
+                title="Mark all as read"
                 className="text-[11px] font-medium text-[var(--color-accent)] hover:underline flex items-center gap-1 cursor-pointer"
               >
                 <CheckCheck size={12} /> Mark all read
@@ -182,7 +183,7 @@ export function NotificationDropdown() {
             ) : notifications.length === 0 ? (
               <div className="py-8 text-center text-xs text-[var(--color-text-tertiary)] flex flex-col items-center gap-2">
                 <Bell size={24} className="opacity-40" />
-                <p className="font-medium text-[var(--color-text-secondary)]">No notifications</p>
+                <p className="font-medium text-[var(--color-text-secondary)]">No notifications yet</p>
                 <p className="text-[11px]">You're all caught up!</p>
               </div>
             ) : (

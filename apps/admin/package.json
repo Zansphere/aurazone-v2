@@ -8,6 +8,9 @@
     "start": "next start --port 3101",
     "lint": "next lint",
     "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "clean": "rm -rf .next"
   },
   "dependencies": {
@@ -47,11 +50,17 @@
     "@aurazone/config-eslint": "workspace:*",
     "@aurazone/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "jsdom": "^30.1.3",
     "postcss": "^8.4.40",
     "tailwindcss": "^4.0.0-beta.7",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^5.0.3"
   }
 }

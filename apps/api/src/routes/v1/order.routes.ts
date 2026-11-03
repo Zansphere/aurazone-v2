@@ -328,9 +328,19 @@ const orderRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const userId = request.user?.userId;
-    const sessionId = request.headers["x-guest-session"] as string | undefined;
+    let sessionId = request.headers["x-guest-session"] as string | undefined;
 
     if (!userId && !sessionId) return sendError(reply, "Unauthorized", 401);
+
+    if (!userId && sessionId) {
+      const guestSession = await prisma.guestSession.findFirst({
+        where: { OR: [{ id: sessionId }, { sessionId }] },
+      });
+      if (!guestSession || guestSession.expiresAt < new Date()) {
+        return sendError(reply, "Session expired", 401);
+      }
+      sessionId = guestSession.id;
+    }
 
     const idempotencyKey = (request.headers["idempotency-key"] || request.headers["x-idempotency-key"]) as string | undefined;
 

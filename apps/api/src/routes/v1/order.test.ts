@@ -16,6 +16,9 @@ vi.mock("@aurazone/database", () => ({
     cart: {
       findFirst: vi.fn(),
     },
+    guestSession: {
+      findFirst: vi.fn(),
+    },
     order: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
@@ -42,6 +45,11 @@ describe("Order Routes", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.mocked(prisma.guestSession.findFirst).mockResolvedValue({
+      id: "sess_123",
+      sessionId: "sess_123",
+      expiresAt: new Date(Date.now() + 86400000),
+    } as any);
     app = Fastify();
     app.setErrorHandler(globalErrorHandler);
     await app.register(orderRoutes, { prefix: "/api/v1/orders" });
@@ -136,6 +144,29 @@ describe("Order Routes", () => {
       const json = JSON.parse(response.payload);
       expect(json.success).toBe(false);
       expect(json.message).toBe("Unauthorized");
+    });
+
+    it("returns 401 if guest session is expired", async () => {
+      vi.mocked(prisma.guestSession.findFirst).mockResolvedValueOnce({
+        id: "sess_123",
+        sessionId: "sess_123",
+        expiresAt: new Date(Date.now() - 1000),
+      } as any);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/orders",
+        headers: { "x-guest-session": "sess_123" },
+        payload: {
+          addressId: "addr_123",
+          paymentMethod: "COD",
+        },
+      });
+
+      expect(response.statusCode).toBe(401);
+      const json = JSON.parse(response.payload);
+      expect(json.success).toBe(false);
+      expect(json.message).toBe("Session expired");
     });
 
     it("returns 201 with standard envelope on successful cart checkout", async () => {

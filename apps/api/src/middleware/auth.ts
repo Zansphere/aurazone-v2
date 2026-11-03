@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import jwt from "jsonwebtoken";
+import jwt, { JsonWebTokenError } from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { sendError } from "./response.js";
 import type { Role } from "@aurazone/database";
@@ -34,15 +34,30 @@ export async function authenticate(
     return sendError(reply, "Authentication required", 401);
   }
 
+  let payload: JwtPayload;
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-    request.user = payload;
+    payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
   } catch (err) {
     const message =
       err instanceof jwt.TokenExpiredError
         ? "Token expired"
         : "Invalid token";
     return sendError(reply, message, 401);
+  }
+
+  try {
+    const { prisma } = await import("@aurazone/database");
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { id: true, email: true },
+    });
+    if (!user || user.email?.startsWith("deleted_")) {
+      return sendError(reply, "User account not found or deleted", 401);
+    }
+    request.user = payload;
+  } catch {
+    if (reply.sent) return;
+    return sendError(reply, "Authentication failed", 401);
   }
 }
 
@@ -87,8 +102,8 @@ export function requireStoreAccess(storeIdSource: "params" | "query" | "body" = 
 
     const source =
       storeIdSource === "params" ? (request.params as any) :
-      storeIdSource === "query" ? (request.query as any) :
-      (request.body as any);
+        storeIdSource === "query" ? (request.query as any) :
+          (request.body as any);
 
     const storeId = source?.[paramName];
     if (!storeId) return; // no storeId to check — downstream will handle
@@ -124,21 +139,33 @@ export async function assertStoreAccess(user: JwtPayload, storeId: string | null
 /**
  * Optional auth — attaches user if token present, but doesn't block.
  */
-export async function optionalAuth(
-  request: FastifyRequest,
-  _reply: FastifyReply
-): Promise<void> {
-  const token =
-    request.cookies?.access_token ??
+export async function optionalAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const token = request.cookies?.access_token ??
     request.headers.authorization?.replace("Bearer ", "");
 
   if (!token) return;
 
+  let payload: JwtPayload;
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+    payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+  } catch (err) {
+    const message = err instanceof jwt.TokenExpiredError ? "Token expired" : "Invalid token";
+    return sendError(reply, message, 401);
+  }
+
+  try {
+    const { prisma } = await import("@aurazone/database");
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { id: true, email: true },
+    });
+    if (!user || user.email?.startsWith("deleted_")) {
+      return sendError(reply, "User account not found or deleted", 401);
+    }
     request.user = payload;
   } catch {
-    // Silently ignore invalid tokens for optional auth
+    if (reply.sent) return;
+    return sendError(reply, "Authentication failed", 401);
   }
 }
 

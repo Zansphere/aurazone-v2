@@ -1,9 +1,20 @@
 import { describe, it, expect, vi } from "vitest";
 import jwt from "jsonwebtoken";
 
-// Mock database for store access checks
+// Mock database for store access checks and user lookups
 vi.mock("@aurazone/database", () => ({
   prisma: {
+    user: {
+      findUnique: vi.fn().mockImplementation(async ({ where }: any) => {
+        if (where?.id === "usr_deleted") {
+          return { id: "usr_deleted", email: "deleted_123_456@deleted.aurazone.internal" };
+        }
+        if (where?.id === "usr_nonexistent") {
+          return null;
+        }
+        return { id: where?.id || "usr_12345", email: "buyer@example.com" };
+      }),
+    },
     storeManager: {
       findMany: vi.fn(),
     },
@@ -100,6 +111,18 @@ describe("Auth Middleware - authenticate", () => {
     expect(reply.statusCode).toBe(401);
     expect((reply as any).sentData.message).toContain("expired");
   });
+
+  it("returns 401 when token belongs to a deleted user", async () => {
+    const deletedToken = jwt.sign({ userId: "usr_deleted", role: "CUSTOMER" }, env.JWT_SECRET);
+    const request = createMockRequest({ authorization: `Bearer ${deletedToken}` });
+    const reply = createMockReply();
+
+    await authenticate(request, reply);
+
+    expect(reply.statusCode).toBe(401);
+    expect((reply as any).sentData.message).toContain("deleted");
+    expect(request.user).toBeUndefined();
+  });
 });
 
 describe("Auth Middleware - optionalAuth", () => {
@@ -122,6 +145,33 @@ describe("Auth Middleware - optionalAuth", () => {
 
     expect(request.user).toBeUndefined();
     expect(reply.statusCode).toBe(200);
+  });
+
+  it("returns 401 when token is expired", async () => {
+    const expiredToken = jwt.sign(
+      { userId: "usr_guest", role: "CUSTOMER" },
+      env.JWT_SECRET,
+      { expiresIn: "-1s" }
+    );
+    const request = createMockRequest({ authorization: `Bearer ${expiredToken}` });
+    const reply = createMockReply();
+
+    await optionalAuth(request, reply);
+
+    expect(reply.statusCode).toBe(401);
+    expect((reply as any).sentData.message).toBe("Token expired");
+    expect(request.user).toBeUndefined();
+  });
+
+  it("returns 401 when token is invalid or malformed", async () => {
+    const request = createMockRequest({ authorization: "Bearer invalid_jwt_token_string" });
+    const reply = createMockReply();
+
+    await optionalAuth(request, reply);
+
+    expect(reply.statusCode).toBe(401);
+    expect((reply as any).sentData.message).toBe("Invalid token");
+    expect(request.user).toBeUndefined();
   });
 });
 

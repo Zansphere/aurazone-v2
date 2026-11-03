@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { storeSchema, categorySchema, productSchema, attributeTemplateSchema, storefrontSectionSchema } from "@aurazone/validators";
 import { parsePagination } from "@aurazone/utils";
 import { authenticate, requireRole, getManagerStoreIds, assertStoreAccess } from "../../../middleware/auth.js";
-import { sendSuccess, sendError, sendPaginated, handleRouteError } from "../../../middleware/response.js";
+import { sendSuccess, sendError, sendPaginated, handleRouteError, formatZodError } from "../../../middleware/response.js";
 import * as storeService from "../../../services/store.service.js";
 import * as categoryService from "../../../services/category.service.js";
 import * as productService from "../../../services/product.service.js";
@@ -138,7 +138,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post("/stores", { preHandler: [requireRole("SUPER_ADMIN")] }, async (request, reply) => {
     const parsed = storeSchema.safeParse(request.body);
-    if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
+    if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
     try {
       const store = await storeService.createStore(parsed.data, request.user!.userId);
       return sendSuccess(reply, store, 201);
@@ -154,7 +154,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       return sendError(reply, "You do not have access to this store", 403);
     }
     const parsed = storeSchema.partial().safeParse(request.body);
-    if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
+    if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
     try {
       const store = await storeService.updateStore(id, parsed.data, request.user!.userId);
       return sendSuccess(reply, store);
@@ -214,7 +214,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post("/categories", async (request, reply) => {
     const parsed = categorySchema.safeParse(request.body);
-    if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
+    if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
     try {
       await assertStoreAccess(request.user!, parsed.data.storeId);
       const category = await categoryService.createCategory(parsed.data, request.user!.userId);
@@ -227,7 +227,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.put("/categories/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const parsed = categorySchema.partial().safeParse(request.body);
-    if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
+    if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
     try {
       const existing = await categoryService.getCategoryById(id);
       await assertStoreAccess(request.user!, existing.store?.id);
@@ -283,7 +283,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post("/products", async (request, reply) => {
     const parsed = productSchema.safeParse(request.body);
-    if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
+    if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
     try {
       await assertStoreAccess(request.user!, parsed.data.storeId);
       const productData = {
@@ -674,7 +674,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post("/attribute-templates", async (request, reply) => {
     const parsed = attributeTemplateSchema.safeParse(request.body);
-    if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
+    if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
     try {
       const template = await attrTemplateService.createAttributeTemplate(parsed.data);
       return sendSuccess(reply, template, 201);
@@ -686,7 +686,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.put("/attribute-templates/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const parsed = attributeTemplateSchema.partial().safeParse(request.body);
-    if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
+    if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
     try {
       const template = await attrTemplateService.updateAttributeTemplate(id, parsed.data);
       return sendSuccess(reply, template);
@@ -859,7 +859,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post("/storefront", async (request, reply) => {
     const parsed = storefrontSectionSchema.safeParse(request.body);
-    if (!parsed.success) return sendError(reply, parsed.error.errors[0].message, 400);
+    if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
 
     await assertStoreAccess(request.user!, parsed.data.storeId);
 

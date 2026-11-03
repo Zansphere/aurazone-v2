@@ -182,5 +182,34 @@ describe('Validators', () => {
       };
       expect(productVariantSchema.safeParse(variant).success).toBe(false);
     });
+
+    it('should allow variant with omitted or empty SKU', () => {
+      const variantWithoutSku = {
+        price: 99.99,
+        quantity: 5,
+        attributes: []
+      };
+      expect(productVariantSchema.safeParse(variantWithoutSku).success).toBe(true);
+
+      const variantWithEmptySku = {
+        sku: '',
+        price: 99.99,
+        quantity: 5,
+        attributes: []
+      };
+      expect(productVariantSchema.safeParse(variantWithEmptySku).success).toBe(true);
+    });
+
+    it('should provide meaningful error messages when required fields are missing', () => {
+      const missingDesc = {
+        storeId: '123e4567-e89b-12d3-a456-426614174000',
+        categoryId: '123e4567-e89b-12d3-a456-426614174001',
+        name: 'Test Product',
+        variants: [{ price: 50, quantity: 1, attributes: [] }]
+      };
+      const result = productSchema.safeParse(missingDesc);
+      expect(result.success).toBe(false);
+      expect(result.error?.errors.some(e => e.message === 'Product description is required')).toBe(true);
+    });
   });
 });

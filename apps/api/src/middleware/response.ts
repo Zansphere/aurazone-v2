@@ -35,6 +35,28 @@ const PRISMA_ERROR_MAP: Record<string, { message: string; status: number }> = {
  * - Prisma errors are mapped to safe, generic messages.
  * - Unknown 500-level errors are replaced with a generic message.
  */
+/**
+ * Formats Zod validation errors into a clean, human-readable string.
+ * Supports array indices for variants (e.g., "Variant #1 (price): Price is required").
+ */
+export function formatZodError(err: ZodError): string {
+  if (!err?.errors?.length) return "Validation error";
+  return err.errors
+    .map((issue) => {
+      const path = issue.path;
+      if (path.length > 0) {
+        if (path[0] === "variants" && typeof path[1] === "number") {
+          const variantNum = path[1] + 1;
+          const fieldName = path.slice(2).join(".") || "field";
+          return `Variant #${variantNum} (${fieldName}): ${issue.message}`;
+        }
+        return `${path.join(".")}: ${issue.message}`;
+      }
+      return issue.message;
+    })
+    .join("; ");
+}
+
 export function sanitizeError(err: unknown): { message: string; statusCode: number } {
   if (!err) {
     return { message: "An unexpected error occurred", statusCode: 500 };
@@ -42,10 +64,7 @@ export function sanitizeError(err: unknown): { message: string; statusCode: numb
 
   // Zod validation errors
   if (err instanceof ZodError) {
-    const firstIssue = err.errors[0];
-    const field = firstIssue?.path?.length ? `${firstIssue.path.join(".")}: ` : "";
-    const message = firstIssue ? `${field}${firstIssue.message}` : "Validation error";
-    return { message, statusCode: 400 };
+    return { message: formatZodError(err), statusCode: 400 };
   }
 
   // JWT errors

@@ -139,34 +139,36 @@ export const attributeTemplateSchema = z.object({
 
 // ─── Product ──────────────────────────────────────────────────────────────────
 export const productVariantAttributeSchema = z.object({
-  key: z.string().min(1),
-  value: z.string().min(1),
+  key: z.string().min(1, "Attribute key is required"),
+  value: z.string().min(1, "Attribute value is required"),
 });
 
 export const productVariantSchema = z.object({
-  sku: z.string().min(1, "SKU is required"),
-  price: z.number().positive("Price must be positive"),
-  compareAtPrice: z.number().positive().optional().nullable(),
+  id: z.string().uuid().optional(),
+  sku: z.string().optional().nullable().or(z.literal("")),
+  price: z.number({ required_error: "Price is required" }).positive("Price must be positive"),
+  compareAtPrice: z.number().positive("Compare at price must be positive").optional().nullable(),
   isAvailable: z.boolean().default(true),
-  attributes: z.array(productVariantAttributeSchema),
-  quantity: z.number().int().min(1, "Stock quantity must be at least 1").default(1),
+  attributes: z.array(productVariantAttributeSchema).default([]),
+  quantity: z.number({ required_error: "Stock quantity is required" }).int("Stock quantity must be an integer").min(1, "Stock quantity must be at least 1").default(1),
   images: z.array(z.any()).optional(),
 });
 
 export const productSchema = z.object({
-  storeId: z.string().uuid("Invalid store"),
-  categoryId: z.string().uuid("Invalid category"),
-  name: z.string().trim().min(1, "Name is required").max(100, "Name cannot exceed 100 characters").regex(/^[a-zA-Z0-9\s\-&.,]+$/, "Only English letters, numbers, and basic punctuation are allowed"),
-  brand: z.string().max(255, "Brand cannot exceed 255 characters").optional(),
-  modelNumber: z.string().max(255, "Model number cannot exceed 255 characters").optional(),
+  storeId: z.string({ required_error: "Store is required" }).uuid("Invalid store ID"),
+  categoryId: z.string({ required_error: "Category is required" }).uuid("Invalid category ID"),
+  name: z.string({ required_error: "Product name is required" }).trim().min(1, "Product name is required").max(100, "Name cannot exceed 100 characters").regex(/^[a-zA-Z0-9\s\-&.,]+$/, "Only English letters, numbers, and basic punctuation are allowed"),
+  slug: z.string().optional().nullable().or(z.literal("")),
+  brand: z.string().max(255, "Brand cannot exceed 255 characters").optional().nullable().or(z.literal("")),
+  modelNumber: z.string().max(255, "Model number cannot exceed 255 characters").optional().nullable().or(z.literal("")),
   gender: z.enum(["MEN", "WOMEN", "UNISEX", "KIDS"]).optional().nullable(),
-  description: z.string().min(1, "Description is required"),
-  shortDescription: z.string().max(500, "Short description cannot exceed 500 characters").optional(),
+  description: z.string({ required_error: "Product description is required" }).trim().min(1, "Product description is required"),
+  shortDescription: z.string().max(500, "Short description cannot exceed 500 characters").optional().nullable().or(z.literal("")),
   tags: z.array(z.string()).default([]),
   hasVariants: z.boolean().default(true),
   isActive: z.boolean().default(true),
   isFeatured: z.boolean().default(false),
-  variants: z.array(productVariantSchema).min(1, "At least one variant required"),
+  variants: z.array(productVariantSchema, { required_error: "At least one variant is required" }).min(1, "At least one variant required"),
 });
 
 // ─── Cart ─────────────────────────────────────────────────────────────────────

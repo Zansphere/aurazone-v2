@@ -377,25 +377,78 @@ export async function invalidateProductCache(
   }
 }
 
+/**
+ * Resolves a variant SKU:
+ * - If provided (non-empty), trims it and verifies uniqueness against other variants.
+ * - If omitted, empty string, or whitespace, auto-generates a guaranteed unique SKU
+ *   using store slug, product slug, variant attributes, and index/collision counter.
+ */
+async function resolveVariantSku(
+  providedSku: string | undefined | null,
+  storeSlug: string | undefined,
+  productSlug: string,
+  variantIndex: number,
+  attributes?: Array<{ key: string; value: string }>,
+  currentVariantId?: string
+): Promise<string> {
+  const trimmed = providedSku?.trim();
+  if (trimmed) {
+    const existing = await prisma.productVariant.findFirst({
+      where: {
+        sku: { equals: trimmed, mode: "insensitive" },
+        ...(currentVariantId ? { id: { not: currentVariantId } } : {}),
+      },
+    });
+    if (existing) {
+      throw Object.assign(new Error(`SKU "${trimmed}" is already in use by another product variant`), { statusCode: 409 });
+    }
+    return trimmed.toUpperCase();
+  }
+
+  // Auto-generate SKU
+  const attrParts = (attributes ?? [])
+    .map((a: any) => a.value)
+    .filter(Boolean);
+  const baseSku = buildSku(storeSlug, productSlug, ...attrParts, String(variantIndex + 1));
+  let candidate = baseSku || `SKU-${Date.now()}-${variantIndex + 1}`;
+  let counter = 1;
+
+  while (
+    await prisma.productVariant.findFirst({
+      where: {
+        sku: candidate,
+        ...(currentVariantId ? { id: { not: currentVariantId } } : {}),
+      },
+    })
+  ) {
+    candidate = `${baseSku}-${counter}`;
+    counter++;
+  }
+
+  return candidate;
+}
+
 export async function createProduct(
   data: {
     storeId: string;
     categoryId: string;
     name: string;
-    slug?: string;
-    brand?: string;
-    modelNumber?: string;
+    slug?: string | null;
+    brand?: string | null;
+    modelNumber?: string | null;
     gender?: any;
-    description?: string;
-    shortDescription?: string;
+    description?: string | null;
+    shortDescription?: string | null;
     tags?: string[];
     hasVariants?: boolean;
     isActive?: boolean;
     isFeatured?: boolean;
     variants: Array<{
-      sku?: string;
+      id?: string;
+      sku?: string | null;
       price: number;
-      compareAtPrice?: number;
+      compareAtPrice?: number | null;
+      isAvailable?: boolean;
       attributes?: Array<{ key: string; value: string }>;
       quantity?: number;
       images?: any[];
@@ -423,9 +476,36 @@ export async function createProduct(
     throw Object.assign(new Error("Product name already exists in this store"), { statusCode: 409 });
   }
 
-  const slug = data.slug ?? slugify(data.name);
+  const slug = data.slug?.trim() ? data.slug.trim() : slugify(data.name);
   const existing = await prisma.product.findUnique({ where: { slug } });
   if (existing) throw Object.assign(new Error("Product slug already taken"), { statusCode: 409 });
+
+  const resolvedVariants = [];
+  for (let i = 0; i < data.variants.length; i++) {
+    const v = data.variants[i];
+    const sku = await resolveVariantSku(
+      v.sku,
+      store.slug,
+      slug,
+      i,
+      v.attributes
+    );
+    resolvedVariants.push({
+      sku,
+      price: v.price,
+      compareAtPrice: v.compareAtPrice ?? null,
+      isAvailable: v.isAvailable ?? true,
+      attributes: v.attributes && v.attributes.length > 0
+        ? { create: v.attributes.map((a: any) => ({ key: a.key, value: a.value })) }
+        : undefined,
+      inventory: {
+        create: { quantity: v.quantity ?? 0 }
+      },
+      images: v.images && v.images.length > 0
+        ? { create: v.images.map((img: any, idx: number) => ({ url: img.url ?? img, position: idx, altText: data.name })) }
+        : undefined
+    });
+  }
 
   const product = await prisma.product.create({
     data: {
@@ -443,21 +523,7 @@ export async function createProduct(
       isActive: data.isActive ?? true,
       isFeatured: data.isFeatured ?? false,
       variants: {
-        create: data.variants.map((v: any, i) => ({
-          sku: v.sku ?? buildSku(store.slug, slug, String(i)),
-          price: v.price,
-          compareAtPrice: v.compareAtPrice ?? null,
-          isAvailable: true,
-          attributes: v.attributes
-            ? { create: v.attributes.map((a: any) => ({ key: a.key, value: a.value })) }
-            : undefined,
-          inventory: {
-            create: { quantity: v.quantity ?? 0 }
-          },
-          images: v.images && v.images.length > 0
-            ? { create: v.images.map((img: any, idx: number) => ({ url: img.url ?? img, position: idx, altText: data.name })) }
-            : undefined
-        })),
+        create: resolvedVariants,
       },
     },
     include: { variants: { include: { attributes: true } } },
@@ -588,10 +654,12 @@ export async function updateProduct(
           }
         }
       } else {
+        const store = product.storeId ? await prisma.store.findUnique({ where: { id: product.storeId } }) : null;
+        const sku = await resolveVariantSku(v.sku, store?.slug, updated.slug, i, v.attributes);
         await prisma.productVariant.create({
           data: {
             productId: id,
-            sku: v.sku ?? `${updated.slug}-${i}-${Date.now()}`,
+            sku,
             price: v.price,
             compareAtPrice: v.compareAtPrice ?? null,
             isAvailable: v.isAvailable ?? true,

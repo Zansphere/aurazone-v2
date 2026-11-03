@@ -255,45 +255,82 @@ export default function ProductForm({
     setValidationError(null);
 
     if (!effectiveStoreId) {
-      setValidationError("Store ID is required to save the product.");
+      setValidationError("Store is required to save the product.");
       return;
     }
 
-    // Validate that no variant has quantity < 1
+    if (!form.name.trim()) {
+      setValidationError("Product Name is required.");
+      return;
+    }
+
+    if (!form.categoryId) {
+      setValidationError("Please select a Category.");
+      return;
+    }
+
+    if (!form.description.trim()) {
+      setValidationError("Product Description is required.");
+      return;
+    }
+
+    // Validate product-level non-variant attributes
+    for (const tmpl of nonVariantTemplates) {
+      if (tmpl.isRequired && !productAttrs[tmpl.key]?.trim()) {
+        setValidationError(`Product attribute "${tmpl.name}" is required.`);
+        return;
+      }
+    }
+
+    // Validate variants
+    if (!variants.length) {
+      setValidationError("At least one product variant is required.");
+      return;
+    }
+
     for (let i = 0; i < variants.length; i++) {
-      const q = parseInt(variants[i].quantity, 10);
+      const v = variants[i];
+      if (!v.price || parseFloat(v.price) <= 0 || isNaN(parseFloat(v.price))) {
+        setValidationError(`Price for Variant #${i + 1} must be greater than 0.`);
+        return;
+      }
+      const q = parseInt(v.quantity, 10);
       if (isNaN(q) || q < 1) {
         setValidationError(`Stock quantity for Variant #${i + 1} must be at least 1.`);
         return;
       }
-      if (!variants[i].price || parseFloat(variants[i].price) <= 0) {
-        setValidationError(`Price for Variant #${i + 1} must be greater than 0.`);
-        return;
+
+      // Check required variant attributes
+      for (const tmpl of variantTemplates) {
+        if (tmpl.isRequired && !v.attributes[tmpl.key]?.trim()) {
+          setValidationError(`Variant #${i + 1} requires attribute "${tmpl.name}".`);
+          return;
+        }
       }
     }
 
     const payload = {
       storeId: effectiveStoreId,
-      name: form.name,
-      slug: form.slug || undefined,
-      brand: form.brand || undefined,
+      name: form.name.trim(),
+      slug: form.slug.trim() || undefined,
+      brand: form.brand.trim() || undefined,
       categoryId: form.categoryId,
-      description: form.description || undefined,
-      shortDescription: form.shortDescription || undefined,
+      description: form.description.trim(),
+      shortDescription: form.shortDescription.trim() || undefined,
       tags: form.tags ? form.tags.split(",").map(s => s.trim()).filter(Boolean) : [],
       isActive: form.isActive,
       isFeatured: form.isFeatured,
       hasVariants: variants.length > 1,
       variants: variants.map(v => ({
         id: v.id,
-        sku: v.sku || undefined,
+        sku: v.sku.trim() || undefined,
         price: parseFloat(v.price),
         compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : undefined,
         quantity: Math.max(1, parseInt(v.quantity, 10) || 1),
         isAvailable: true,
-        attributes: Object.entries(v.attributes)
-          .filter(([, val]) => val)
-          .map(([key, value]) => ({ key, value })),
+        attributes: Object.entries({ ...productAttrs, ...v.attributes })
+          .filter(([, val]) => val && val.trim())
+          .map(([key, value]) => ({ key, value: value.trim() })),
         images: v.images,
       })),
     };
@@ -390,7 +427,7 @@ export default function ProductForm({
           <div className="flex items-center gap-2">
             <input type="color" className="h-8 w-8 rounded cursor-pointer border-0" value={value || "#000000"} onChange={e => onChange(e.target.value)} />
             <input type="text" className="form-input text-xs flex-1 font-mono" value={value} onChange={e => onChange(e.target.value)}
-              placeholder="#000000" />
+              placeholder="#000000" required={tmpl.isRequired} />
           </div>
         );
       case "BOOLEAN":
@@ -422,9 +459,14 @@ export default function ProductForm({
         <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]">
           <ArrowLeft size={16} />
         </button>
-        <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
-          {productId ? "Edit Product" : "New Product"}
-        </h3>
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
+            {productId ? "Edit Product" : "New Product"}
+          </h3>
+          <p className="text-[11px] text-[var(--color-text-tertiary)]">
+            Fields marked with <span className="text-[var(--color-danger)] font-medium">*</span> are required.
+          </p>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
@@ -433,7 +475,7 @@ export default function ProductForm({
           <p className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide">Basic Information</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="form-label">Product Name</label>
+              <label className="form-label">Product Name <span className="text-[var(--color-danger)]">*</span></label>
               <input type="text" className={`form-input ${isNameError ? 'border-[var(--color-danger)] focus:ring-[var(--color-danger)]' : ''}`} required value={form.name}
                 onChange={(e) => {
                   setForm(f => ({
@@ -446,7 +488,7 @@ export default function ProductForm({
               {isNameError && <p className="text-[10px] text-[var(--color-danger)] mt-1">A product with this name already exists in this store.</p>}
             </div>
             <div>
-              <label className="form-label">Slug</label>
+              <label className="form-label">Slug <span className="text-[10px] text-[var(--color-text-tertiary)] font-normal">(Auto-generated if empty)</span></label>
               <input type="text" className={`form-input font-mono text-xs ${isSlugError ? 'border-[var(--color-danger)] focus:ring-[var(--color-danger)]' : ''}`} value={form.slug}
                 onChange={(e) => {
                   setForm(f => ({ ...f, slug: e.target.value }));
@@ -459,7 +501,7 @@ export default function ProductForm({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="form-label !mb-0">Category</label>
+                <label className="form-label !mb-0">Category <span className="text-[var(--color-danger)]">*</span></label>
                 {storeId && !isCreatingCategory && (
                   <button
                     type="button"
@@ -551,21 +593,21 @@ export default function ProductForm({
               )}
             </div>
             <div>
-              <label className="form-label">Brand</label>
+              <label className="form-label">Brand <span className="text-[10px] text-[var(--color-text-tertiary)] font-normal">(Optional)</span></label>
               <input type="text" className="form-input text-xs" value={form.brand}
                 onChange={(e) => setForm(f => ({ ...f, brand: e.target.value }))}
                 placeholder="Optional brand name" />
             </div>
           </div>
           <div>
-            <label className="form-label">Description</label>
-            <textarea className="form-input min-h-[80px] resize-y text-xs" value={form.description}
+            <label className="form-label">Description <span className="text-[var(--color-danger)]">*</span></label>
+            <textarea className="form-input min-h-[80px] resize-y text-xs" required value={form.description}
               onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))}
-              placeholder="Product description..." />
+              placeholder="Detailed product description (required)..." />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="form-label">Tags (comma-separated)</label>
+              <label className="form-label">Tags <span className="text-[10px] text-[var(--color-text-tertiary)] font-normal">(Optional, comma-separated)</span></label>
               <input type="text" className="form-input text-xs" value={form.tags}
                 onChange={(e) => setForm(f => ({ ...f, tags: e.target.value }))}
                 placeholder="summer, sale, new" />
@@ -642,18 +684,18 @@ export default function ProductForm({
 
               <div className="grid grid-cols-4 gap-2">
                 <div>
-                  <label className="form-label">SKU</label>
+                  <label className="form-label">SKU <span className="text-[10px] text-[var(--color-text-tertiary)] font-normal">(Auto-generated if empty)</span></label>
                   <input type="text" className="form-input text-xs font-mono" value={variant.sku}
                     onChange={(e) => updateVariant(idx, "sku", e.target.value)}
                     placeholder="Auto-generated" />
                 </div>
                 <div>
-                  <label className="form-label">Price (₹)</label>
+                  <label className="form-label">Price (₹) <span className="text-[var(--color-danger)]">*</span></label>
                   <input type="number" className="form-input text-xs" required step="0.01" min="0"
                     value={variant.price} onChange={(e) => updateVariant(idx, "price", e.target.value)} />
                 </div>
                 <div>
-                  <label className="form-label">Compare At</label>
+                  <label className="form-label">Compare At <span className="text-[10px] text-[var(--color-text-tertiary)] font-normal">(Optional)</span></label>
                   <input type="number" className="form-input text-xs" step="0.01" min="0"
                     value={variant.compareAtPrice}
                     onChange={(e) => updateVariant(idx, "compareAtPrice", e.target.value)}
@@ -661,7 +703,7 @@ export default function ProductForm({
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="form-label !mb-0">Stock Qty</label>
+                    <label className="form-label !mb-0">Stock Qty <span className="text-[var(--color-danger)]">*</span></label>
                     <span className="text-[10px] text-[var(--color-text-tertiary)]">Min 1</span>
                   </div>
                   <input
@@ -705,7 +747,7 @@ export default function ProductForm({
                 <div className="grid grid-cols-3 gap-2 pt-1">
                   {variantTemplates.map(tmpl => (
                     <div key={tmpl.id}>
-                      <label className="form-label text-[10px]">{tmpl.name}</label>
+                      <label className="form-label text-[10px]">{tmpl.name} {tmpl.isRequired && <span className="text-[var(--color-danger)]">*</span>}</label>
                       {renderField(
                         tmpl,
                         variant.attributes[tmpl.key] ?? "",

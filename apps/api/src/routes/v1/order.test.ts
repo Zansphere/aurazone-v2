@@ -196,6 +196,57 @@ describe("Order Routes", () => {
     });
   });
 
+  describe("GET /api/v1/orders", () => {
+    it("returns 401 when request has neither user authentication nor guest session", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/orders",
+      });
+
+      expect(response.statusCode).toBe(401);
+      const json = JSON.parse(response.payload);
+      expect(json.success).toBe(false);
+      expect(json.message).toBe("Authentication required");
+    });
+
+    it("returns 401 when guest session is expired", async () => {
+      vi.mocked(prisma.guestSession.findFirst).mockResolvedValueOnce({
+        id: "sess_expired",
+        sessionId: "sess_expired",
+        expiresAt: new Date(Date.now() - 1000),
+      } as any);
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/orders",
+        headers: { "x-guest-session": "sess_expired" },
+      });
+
+      expect(response.statusCode).toBe(401);
+      const json = JSON.parse(response.payload);
+      expect(json.success).toBe(false);
+      expect(json.message).toBe("Session expired");
+    });
+
+    it("returns 200 with orders when valid guest session is provided", async () => {
+      vi.mocked(orderService.getUserOrders).mockResolvedValueOnce({
+        orders: [],
+        total: 0,
+      } as any);
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/orders",
+        headers: { "x-guest-session": "sess_123" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const json = JSON.parse(response.payload);
+      expect(json.success).toBe(true);
+      expect(json.data).toEqual([]);
+    });
+  });
+
   describe("POST /api/v1/orders/direct (Direct Checkout)", () => {
     it("returns 400 if variantId is missing", async () => {
       const response = await app.inject({

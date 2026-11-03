@@ -448,10 +448,20 @@ const orderRoutes: FastifyPluginAsync = async (fastify) => {
     const query = request.query as Record<string, string>;
     const { skip, take } = parsePagination(query.skip, query.take);
     const userId = request.user?.userId;
-    const sessionId = request.headers["x-guest-session"] as string | undefined;
+    let sessionId = request.headers["x-guest-session"] as string | undefined;
 
     if (!userId && !sessionId) {
-      return sendPaginated(reply, [], 0, 1, take);
+      return sendError(reply, "Authentication required", 401);
+    }
+
+    if (!userId && sessionId) {
+      const guestSession = await prisma.guestSession.findFirst({
+        where: { OR: [{ id: sessionId }, { sessionId }] },
+      });
+      if (!guestSession || guestSession.expiresAt < new Date()) {
+        return sendError(reply, "Session expired", 401);
+      }
+      sessionId = guestSession.id;
     }
 
     const { orders, total } = await orderService.getUserOrders({ userId, sessionId, skip, take });

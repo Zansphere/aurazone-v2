@@ -271,7 +271,7 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.patch("/:itemId", async (request, reply) => {
+  const updateCartItemHandler = async (request: any, reply: any) => {
     try {
       const { itemId } = request.params as { itemId: string };
       const parsed = updateCartItemSchema.safeParse(request.body);
@@ -341,7 +341,10 @@ const cartRoutes: FastifyPluginAsync = async (fastify) => {
     } catch (e: unknown) {
       return handleRouteError(reply, e);
     }
-  });
+  };
+
+  fastify.patch("/:itemId", updateCartItemHandler);
+  fastify.put("/:itemId", updateCartItemHandler);
 
   fastify.delete("/:itemId", async (request, reply) => {
     try {

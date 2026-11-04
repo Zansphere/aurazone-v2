@@ -3,6 +3,7 @@ import jwt, { JsonWebTokenError } from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { sendError } from "./response.js";
 import type { Role } from "@aurazone/database";
+import { isTokenRevoked } from "../services/tokenBlocklist.service.js";
 
 export interface JwtPayload {
   userId: string;
@@ -34,6 +35,11 @@ export async function authenticate(
     return sendError(reply, "Authentication required", 401);
   }
 
+  const redis = (request.server as any)?.redis;
+  if (await isTokenRevoked(token, redis)) {
+    return sendError(reply, "Token has been revoked", 401);
+  }
+
   let payload: JwtPayload;
   try {
     payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
@@ -49,10 +55,10 @@ export async function authenticate(
     const { prisma } = await import("@aurazone/database");
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, email: true },
+      select: { id: true, email: true, isActive: true },
     });
-    if (!user || user.email?.startsWith("deleted_")) {
-      return sendError(reply, "User account not found or deleted", 401);
+    if (!user || !user.isActive || user.email?.startsWith("deleted_")) {
+      return sendError(reply, "User account not found, deactivated, or deleted", 401);
     }
     request.user = payload;
   } catch {
@@ -145,6 +151,11 @@ export async function optionalAuth(request: FastifyRequest, reply: FastifyReply)
 
   if (!token) return;
 
+  const redis = (request.server as any)?.redis;
+  if (await isTokenRevoked(token, redis)) {
+    return sendError(reply, "Token has been revoked", 401);
+  }
+
   let payload: JwtPayload;
   try {
     payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
@@ -157,10 +168,10 @@ export async function optionalAuth(request: FastifyRequest, reply: FastifyReply)
     const { prisma } = await import("@aurazone/database");
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, email: true },
+      select: { id: true, email: true, isActive: true },
     });
-    if (!user || user.email?.startsWith("deleted_")) {
-      return sendError(reply, "User account not found or deleted", 401);
+    if (!user || !user.isActive || user.email?.startsWith("deleted_")) {
+      return sendError(reply, "User account not found, deactivated, or deleted", 401);
     }
     request.user = payload;
   } catch {

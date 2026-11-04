@@ -7,12 +7,15 @@ vi.mock("@aurazone/database", () => ({
     user: {
       findUnique: vi.fn().mockImplementation(async ({ where }: any) => {
         if (where?.id === "usr_deleted") {
-          return { id: "usr_deleted", email: "deleted_123_456@deleted.aurazone.internal" };
+          return { id: "usr_deleted", email: "deleted_123_456@deleted.aurazone.internal", isActive: false };
+        }
+        if (where?.id === "usr_deactivated") {
+          return { id: "usr_deactivated", email: "deactivated@example.com", isActive: false };
         }
         if (where?.id === "usr_nonexistent") {
           return null;
         }
-        return { id: where?.id || "usr_12345", email: "buyer@example.com" };
+        return { id: where?.id || "usr_12345", email: "buyer@example.com", isActive: true };
       }),
     },
     storeManager: {
@@ -120,7 +123,19 @@ describe("Auth Middleware - authenticate", () => {
     await authenticate(request, reply);
 
     expect(reply.statusCode).toBe(401);
-    expect((reply as any).sentData.message).toContain("deleted");
+    expect((reply as any).sentData.message).toContain("deactivated");
+    expect(request.user).toBeUndefined();
+  });
+
+  it("returns 401 when token belongs to a deactivated user", async () => {
+    const deactivatedToken = jwt.sign({ userId: "usr_deactivated", role: "CUSTOMER" }, env.JWT_SECRET);
+    const request = createMockRequest({ authorization: `Bearer ${deactivatedToken}` });
+    const reply = createMockReply();
+
+    await authenticate(request, reply);
+
+    expect(reply.statusCode).toBe(401);
+    expect((reply as any).sentData.message).toContain("deactivated");
     expect(request.user).toBeUndefined();
   });
 });

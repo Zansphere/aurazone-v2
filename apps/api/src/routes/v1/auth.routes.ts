@@ -1,9 +1,11 @@
 import type { FastifyPluginAsync } from "fastify";
+import jwt from "jsonwebtoken";
 import { loginSchema, signupSchema, forgotPasswordSchema, resetPasswordSchema } from "@aurazone/validators";
-import { authenticate, setAuthCookies, clearAuthCookies } from "../../middleware/auth.js";
+import { authenticate, setAuthCookies, clearAuthCookies, type JwtPayload } from "../../middleware/auth.js";
 import { sendSuccess, sendError, handleRouteError } from "../../middleware/response.js";
 import * as authService from "../../services/auth.service.js";
 import { EmailService } from "../../services/email.service.js";
+import { revokeToken } from "../../services/tokenBlocklist.service.js";
 import { env } from "../../config/env.js";
 
 const authRoutes: FastifyPluginAsync = async (fastify) => {
@@ -16,7 +18,17 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
   };
 
   // ─── POST /signup ─────────────────────────────────────────────
-  fastify.post("/signup", async (request, reply) => {
+  fastify.post(
+    "/signup",
+    {
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    async (request, reply) => {
     const parsed = signupSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendError(reply, parsed.error.errors[0].message, 400);
@@ -62,7 +74,17 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // ─── POST /login ──────────────────────────────────────────────
-  fastify.post("/login", async (request, reply) => {
+  fastify.post(
+    "/login",
+    {
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    async (request, reply) => {
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendError(reply, parsed.error.errors[0].message, 400);
@@ -79,6 +101,65 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
         deviceInfo,
         ipAddress
       );
+
+      // If logging in via admin portal scope, verify administrative role
+      const isExplicitAdminPortal =
+        request.headers["x-auth-portal"] === "admin" ||
+        (request.body as any)?.portal === "admin";
+      if (isExplicitAdminPortal && user.role !== "SUPER_ADMIN") {
+        return sendError(reply, "Access denied: Administrator privileges required", 403);
+      }
+
+      setAuthCookies(reply, accessToken, refreshToken);
+
+      return sendSuccess(reply, {
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          role: user.role,
+          isEmailVerified: user.isEmailVerified,
+        },
+        accessToken,
+        refreshToken,
+      });
+    } catch (err: unknown) {
+      return handleRouteError(reply, err);
+    }
+  });
+
+  // ─── POST /admin/login — Dedicated Admin Authentication Route ──
+  fastify.post(
+    "/admin/login",
+    {
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    async (request, reply) => {
+    const parsed = loginSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendError(reply, parsed.error.errors[0].message, 400);
+    }
+
+    try {
+      const { deviceInfo, ipAddress } = getClientMetadata(request);
+
+      const { user, accessToken, refreshToken } = await authService.loginWithEmail(
+        parsed.data.email,
+        parsed.data.password,
+        undefined,
+        deviceInfo,
+        ipAddress
+      );
+
+      // Reject non-admin roles (STORE_MANAGER, CUSTOMER)
+      if (user.role !== "SUPER_ADMIN") {
+        return sendError(reply, "Access denied: Administrator privileges required", 403);
+      }
 
       setAuthCookies(reply, accessToken, refreshToken);
 
@@ -155,7 +236,24 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
 
   // ─── POST /logout ─────────────────────────────────────────────
   fastify.post("/logout", async (request, reply) => {
-    const refreshToken = request.cookies?.refresh_token;
+    const accessToken =
+      request.cookies?.access_token ??
+      request.headers.authorization?.replace("Bearer ", "");
+    const refreshToken =
+      request.cookies?.refresh_token ??
+      (request.body as any)?.refreshToken;
+
+    if (accessToken) {
+      try {
+        const decoded = jwt.decode(accessToken) as JwtPayload | null;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const remainingTtl = decoded?.exp ? Math.max(1, decoded.exp - nowSec) : 900;
+        await revokeToken(accessToken, remainingTtl, fastify.redis);
+      } catch {
+        await revokeToken(accessToken, 900, fastify.redis);
+      }
+    }
+
     if (refreshToken) {
       await authService.logout(refreshToken);
     }
@@ -164,16 +262,14 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // ─── POST /forgot-password ────────────────────────────────────
-  fastify.post(
-    "/forgot-password",
-    {
-      config: {
-        rateLimit: {
-          max: 5,
-          timeWindow: "15 minutes",
-        },
+  fastify.post("/forgot-password", {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: "15 minutes",
       },
     },
+  },
     async (request, reply) => {
       const parsed = forgotPasswordSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -202,7 +298,17 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   // ─── POST /reset-password ────────────────────────────────────
-  fastify.post("/reset-password", async (request, reply) => {
+  fastify.post(
+    "/reset-password",
+    {
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: "15 minutes",
+        },
+      },
+    },
+    async (request, reply) => {
     const parsed = resetPasswordSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendError(reply, parsed.error.errors[0].message, 400);

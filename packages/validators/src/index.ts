@@ -2,13 +2,13 @@ import { z } from "zod";
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const loginSchema = z.object({
-  email: z.string().email("Invalid email"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  email: z.string().trim().email("Invalid email"),
+  password: z.string().min(6, "Password must be at least 6 characters").max(128, "Password cannot exceed 128 characters"),
 });
 
 export const signupSchema = z.object({
-  email: z.string().email("Invalid email"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  email: z.string().trim().email("Invalid email"),
+  password: z.string().min(6, "Password must be at least 6 characters").max(128, "Password cannot exceed 128 characters"),
   fullName: z.string().min(2, "Name must be at least 2 characters").optional(),
 });
 

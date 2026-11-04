@@ -24,6 +24,20 @@ describe('Validators', () => {
       const invalidData = { email: 'test@example.com', password: 'pass' };
       expect(loginSchema.safeParse(invalidData).success).toBe(false);
     });
+
+    it('should reject password exceeding 128 characters (TC-AUTH-012)', () => {
+      const invalidData = { email: 'test@example.com', password: 'a'.repeat(129) };
+      expect(loginSchema.safeParse(invalidData).success).toBe(false);
+    });
+
+    it('should accept email with leading or trailing spaces (TC-AUTH-003)', () => {
+      const validData = { email: '  test@example.com  ', password: 'password123' };
+      const parsed = loginSchema.safeParse(validData);
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        expect(parsed.data.email).toBe('test@example.com');
+      }
+    });
   });
 
   describe('signupSchema', () => {

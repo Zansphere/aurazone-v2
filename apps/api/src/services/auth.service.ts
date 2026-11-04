@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { prisma, type User } from "@aurazone/database";
-import { generateTokens } from "../middleware/auth.js";
+import { generateTokens } from "../middleware/auth";
 
 const SALT_ROUNDS = 12;
 
@@ -150,6 +150,14 @@ export async function loginWithEmail(
     throw Object.assign(new Error("Invalid email or password"), { statusCode: 401 });
   }
 
+  // Deactivated or Suspended Users cannot log in or obtain JWT tokens
+  if (!user.isActive || user.email?.startsWith("deleted_")) {
+    throw Object.assign(
+      new Error("Account suspended. Please contact support."),
+      { statusCode: 403 }
+    );
+  }
+
   // Update last login timestamp
   await prisma.user.update({
     where: { id: user.id },
@@ -241,7 +249,12 @@ export async function refreshAccessToken(refreshToken: string) {
   }
 
   const user = await prisma.user.findUnique({ where: { id: session.userId } });
-  if (!user) throw Object.assign(new Error("User not found"), { statusCode: 401 });
+  if (!user || !user.isActive || user.email?.startsWith("deleted_")) {
+    throw Object.assign(
+      new Error("Account is deactivated or suspended"),
+      { statusCode: 401 }
+    );
+  }
 
   const tokens = generateTokens({ userId: user.id, email: user.email!, role: user.role });
 

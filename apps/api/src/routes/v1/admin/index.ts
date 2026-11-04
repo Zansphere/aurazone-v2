@@ -10,7 +10,7 @@ import * as orderService from "../../../services/order.service.js";
 import { getAvailableNextStatuses } from "../../../services/orderStateMachine.js";
 import * as attrTemplateService from "../../../services/attributeTemplate.service.js";
 import * as auditLogService from "../../../services/auditLog.service.js";
-import { prisma, Prisma } from "@aurazone/database";
+import { prisma, Prisma, OrderStatus, OrderShipmentStatus } from "@aurazone/database";
 
 const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // All admin routes require authentication + admin or store manager role
@@ -732,7 +732,16 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
 
     const where: any = {};
-    if (query.status) where.status = query.status;
+    if (query.status) {
+      if (!Object.values(OrderStatus).includes(query.status as OrderStatus)) {
+        return sendError(
+          reply,
+          `Invalid order status '${query.status}'. Must be one of: ${Object.values(OrderStatus).join(", ")}`,
+          400
+        );
+      }
+      where.status = query.status;
+    }
     if (query.search) {
       where.OR = [
         { orderNumber: { contains: query.search, mode: "insensitive" } },
@@ -797,6 +806,14 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     const { status } = request.body as { status: string };
 
     if (!status) return sendError(reply, "status is required", 400);
+
+    if (!Object.values(OrderStatus).includes(status as OrderStatus)) {
+      return sendError(
+        reply,
+        `Invalid order status '${status}'. Must be one of: ${Object.values(OrderStatus).join(", ")}`,
+        400
+      );
+    }
 
     try {
       const order = await orderService.getOrderById(id);
@@ -1008,7 +1025,10 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
     const storeWhere = allowedStoreIds ? { id: { in: allowedStoreIds } } : {};
     const productWhere = allowedStoreIds ? { storeId: { in: allowedStoreIds } } : {};
-    const orderWhere = allowedStoreIds ? { items: { some: { variant: { product: { storeId: { in: allowedStoreIds } } } } } } : {};
+    const orderWhere: Prisma.OrderWhereInput = {
+      deletedAt: null,
+      ...(allowedStoreIds ? { items: { some: { variant: { product: { storeId: { in: allowedStoreIds } } } } } } : {}),
+    };
 
     const [
       totalStores, totalProducts, totalOrders, totalUsers,
@@ -1170,7 +1190,16 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       where.order = { items: { some: { variant: { product: { storeId: { in: allowedStoreIds } } } } } };
     }
     
-    if (query.status) where.status = query.status;
+    if (query.status) {
+      if (!Object.values(OrderShipmentStatus).includes(query.status as OrderShipmentStatus)) {
+        return sendError(
+          reply,
+          `Invalid shipment status '${query.status}'. Must be one of: ${Object.values(OrderShipmentStatus).join(", ")}`,
+          400
+        );
+      }
+      where.status = query.status;
+    }
     if (query.search) {
       where.OR = [
         { trackingNumber: { contains: query.search, mode: "insensitive" } },
@@ -1393,7 +1422,10 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     since.setDate(since.getDate() - daysBack);
 
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
-    const orderWhere = allowedStoreIds ? { items: { some: { variant: { product: { storeId: { in: allowedStoreIds } } } } } } : {};
+    const orderWhere: Prisma.OrderWhereInput = {
+      deletedAt: null,
+      ...(allowedStoreIds ? { items: { some: { variant: { product: { storeId: { in: allowedStoreIds } } } } } } : {}),
+    };
 
     const [
       totalRevenue,

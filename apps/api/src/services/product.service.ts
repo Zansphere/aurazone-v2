@@ -480,7 +480,20 @@ export async function createProduct(
   const existing = await prisma.product.findUnique({ where: { slug } });
   if (existing) throw Object.assign(new Error("Product slug already taken"), { statusCode: 409 });
 
+  // Bug 67: Validate SKU uniqueness across variants within the same product creation request
+  const explicitSkus = (data.variants || [])
+    .map((v) => v.sku?.trim()?.toUpperCase())
+    .filter((s): s is string => !!s);
+  const seenExplicitSkus = new Set<string>();
+  for (const s of explicitSkus) {
+    if (seenExplicitSkus.has(s)) {
+      throw Object.assign(new Error("Duplicate SKU values are not allowed"), { statusCode: 400 });
+    }
+    seenExplicitSkus.add(s);
+  }
+
   const resolvedVariants = [];
+  const seenResolvedSkus = new Set<string>();
   for (let i = 0; i < data.variants.length; i++) {
     const v = data.variants[i];
     const sku = await resolveVariantSku(
@@ -490,6 +503,11 @@ export async function createProduct(
       i,
       v.attributes
     );
+    const upperSku = sku.toUpperCase();
+    if (seenResolvedSkus.has(upperSku)) {
+      throw Object.assign(new Error("Duplicate SKU values are not allowed"), { statusCode: 400 });
+    }
+    seenResolvedSkus.add(upperSku);
     resolvedVariants.push({
       sku,
       price: v.price,
@@ -600,12 +618,35 @@ export async function updateProduct(
   if (data.variants) {
     const keepVariantIds = data.variants.filter((v: any) => v.id).map((v: any) => v.id);
 
-    await prisma.productVariant.deleteMany({
+    // Bug 65: Prevent deleting variants that exist in customer order history
+    const variantsToDelete = await prisma.productVariant.findMany({
       where: {
         productId: id,
         id: { notIn: keepVariantIds },
       },
+      select: { id: true, sku: true },
     });
+
+    if (variantsToDelete.length > 0) {
+      const variantIdsToDelete = variantsToDelete.map((v) => v.id);
+      const inOrderHistory = await prisma.orderItem.findFirst({
+        where: { variantId: { in: variantIdsToDelete } },
+      });
+
+      if (inOrderHistory) {
+        throw Object.assign(
+          new Error("Cannot delete variant present in order history"),
+          { statusCode: 409 }
+        );
+      }
+
+      await prisma.productVariant.deleteMany({
+        where: {
+          productId: id,
+          id: { in: variantIdsToDelete },
+        },
+      });
+    }
 
     for (const [i, v] of data.variants.entries()) {
       if (v.id) {

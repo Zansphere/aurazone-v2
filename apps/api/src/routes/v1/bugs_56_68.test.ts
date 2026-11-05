@@ -558,4 +558,57 @@ describe("Bugs 56-68 Test Suite", () => {
       expect(UploadService.getPresignedUrl).toHaveBeenCalledWith("banner.jpg", "image/jpeg");
     });
   });
+  // ─── Option 1: Re-creation of Deleted Items & Multi-Store Categories ────
+  describe("Option 1: Partial Indexes & Soft Delete Re-creation", () => {
+    it("allows re-creating a product with same name/slug if previous one was soft-deleted", async () => {
+      vi.mocked(prisma.store.findUnique).mockResolvedValue({ id: validStoreId, slug: "mystore" } as any);
+      vi.mocked(prisma.category.findUnique).mockResolvedValue({ id: "cat-1", storeId: validStoreId } as any);
+
+      // findFirst returns null because deletedAt: null filter excludes deleted ones
+      vi.mocked(prisma.product.findFirst).mockResolvedValue(null);
+      vi.mocked(prisma.productVariant.findFirst).mockResolvedValue(null);
+      vi.mocked(prisma.product.create).mockResolvedValue({
+        id: "prod-new-1",
+        name: "Deleted Shirt",
+        slug: "deleted-shirt",
+        storeId: validStoreId,
+      } as any);
+
+      const created = await productService.createProduct({
+        storeId: validStoreId,
+        categoryId: "cat-1",
+        name: "Deleted Shirt",
+        variants: [{ sku: "SHIRT-1", price: 100 }],
+      });
+
+      expect(created.name).toBe("Deleted Shirt");
+      expect(prisma.product.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            deletedAt: null,
+          }),
+        })
+      );
+    });
+
+    it("allows creating category with same name across multiple stores", async () => {
+      vi.mocked(prisma.store.findUnique).mockResolvedValue({ id: validStoreId } as any);
+      vi.mocked(categoryService.createCategory).mockResolvedValue({
+        id: "cat-others-2",
+        name: "Others",
+        slug: "others",
+        storeId: validStoreId,
+      } as any);
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/admin/stores/${validStoreId}/categories`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { name: "Others" },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.json().data.name).toBe("Others");
+    });
+  });
 });

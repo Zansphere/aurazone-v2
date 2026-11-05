@@ -396,6 +396,7 @@ async function resolveVariantSku(
     const existing = await prisma.productVariant.findFirst({
       where: {
         sku: { equals: trimmed, mode: "insensitive" },
+        deletedAt: null,
         ...(currentVariantId ? { id: { not: currentVariantId } } : {}),
       },
     });
@@ -417,6 +418,7 @@ async function resolveVariantSku(
     await prisma.productVariant.findFirst({
       where: {
         sku: candidate,
+        deletedAt: null,
         ...(currentVariantId ? { id: { not: currentVariantId } } : {}),
       },
     })
@@ -470,14 +472,14 @@ export async function createProduct(
   if (data.name) data.name = data.name.trim();
 
   const existingName = await prisma.product.findFirst({
-    where: { storeId: data.storeId, name: { equals: data.name, mode: "insensitive" } },
+    where: { storeId: data.storeId, name: { equals: data.name, mode: "insensitive" }, deletedAt: null },
   });
   if (existingName) {
     throw Object.assign(new Error("Product name already exists in this store"), { statusCode: 409 });
   }
 
   const slug = data.slug?.trim() ? data.slug.trim() : slugify(data.name);
-  const existing = await prisma.product.findUnique({ where: { slug } });
+  const existing = await prisma.product.findFirst({ where: { slug, deletedAt: null } });
   if (existing) throw Object.assign(new Error("Product slug already taken"), { statusCode: 409 });
 
   // Bug 67: Validate SKU uniqueness across variants within the same product creation request
@@ -582,7 +584,7 @@ export async function updateProduct(
   if (data.name && data.name.trim().toLowerCase() !== product.name.toLowerCase()) {
     const trimmedName = data.name.trim();
     const existingName = await prisma.product.findFirst({
-      where: { storeId: product.storeId, name: { equals: trimmedName, mode: "insensitive" } },
+      where: { storeId: product.storeId, name: { equals: trimmedName, mode: "insensitive" }, deletedAt: null, id: { not: id } },
     });
     if (existingName) {
       throw Object.assign(new Error("Product name already exists in this store"), { statusCode: 409 });
@@ -591,7 +593,7 @@ export async function updateProduct(
   }
 
   if (data.slug && data.slug !== product.slug) {
-    const slugTaken = await prisma.product.findUnique({ where: { slug: data.slug } });
+    const slugTaken = await prisma.product.findFirst({ where: { slug: data.slug, deletedAt: null, id: { not: id } } });
     if (slugTaken) throw Object.assign(new Error("Product slug already taken"), { statusCode: 409 });
   }
 

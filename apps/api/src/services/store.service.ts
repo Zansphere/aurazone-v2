@@ -99,9 +99,16 @@ export async function createStore(
 ): Promise<Store> {
   const slug = data.slug ?? slugify(data.name);
 
-  const existing = await prisma.store.findUnique({ where: { slug } });
+  const existing = await prisma.store.findFirst({ where: { slug, deletedAt: null } });
   if (existing) {
     throw Object.assign(new Error("Store slug already taken"), { statusCode: 409 });
+  }
+
+  const existingName = await prisma.store.findFirst({
+    where: { name: { equals: data.name.trim(), mode: "insensitive" }, deletedAt: null },
+  });
+  if (existingName) {
+    throw Object.assign(new Error("Store name already taken"), { statusCode: 409 });
   }
 
   const store = await prisma.store.create({
@@ -150,8 +157,17 @@ export async function updateStore(
     throw Object.assign(new Error("Store not found"), { statusCode: 404 });
   }
 
+  if (data.name && data.name.trim().toLowerCase() !== store.name.toLowerCase()) {
+    const nameTaken = await prisma.store.findFirst({
+      where: { name: { equals: data.name.trim(), mode: "insensitive" }, deletedAt: null, id: { not: id } },
+    });
+    if (nameTaken) {
+      throw Object.assign(new Error("Store name already taken"), { statusCode: 409 });
+    }
+  }
+
   if (data.slug && data.slug !== store.slug) {
-    const slugTaken = await prisma.store.findUnique({ where: { slug: data.slug } });
+    const slugTaken = await prisma.store.findFirst({ where: { slug: data.slug, deletedAt: null, id: { not: id } } });
     if (slugTaken) {
       throw Object.assign(new Error("Store slug already taken"), { statusCode: 409 });
     }

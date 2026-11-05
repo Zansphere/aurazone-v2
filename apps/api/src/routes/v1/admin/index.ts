@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { storeSchema, categorySchema, productSchema, attributeTemplateSchema, storefrontSectionSchema } from "@aurazone/validators";
-import { parsePagination } from "@aurazone/utils";
+import { parsePagination, slugify } from "@aurazone/utils";
 import { authenticate, requireRole, getManagerStoreIds, assertStoreAccess } from "../../../middleware/auth.js";
 import { sendSuccess, sendError, sendPaginated, handleRouteError, formatZodError } from "../../../middleware/response.js";
 import * as storeService from "../../../services/store.service.js";
@@ -113,7 +113,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/stores", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
     const { stores, total } = await storeService.listStores({
       activeOnly: false, search: query.search, skip, take,
@@ -183,13 +183,93 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
+  // ─── Nested Store Sub-Resources (Bug 64: TC-STR-030 to 038) ─────────────
+  fastify.get("/stores/:storeId/categories", async (request, reply) => {
+    const { storeId } = request.params as { storeId: string };
+    await assertStoreAccess(request.user!, storeId);
+
+    const store = await prisma.store.findUnique({ where: { id: storeId, deletedAt: null } });
+    if (!store) return sendError(reply, "Store not found", 404);
+
+    const { categories } = await categoryService.listCategories({
+      storeId,
+      activeOnly: false,
+    });
+    return sendSuccess(reply, categories);
+  });
+
+  fastify.post("/stores/:storeId/categories", async (request, reply) => {
+    const { storeId } = request.params as { storeId: string };
+    await assertStoreAccess(request.user!, storeId);
+
+    const store = await prisma.store.findUnique({ where: { id: storeId, deletedAt: null } });
+    if (!store) return sendError(reply, "Store not found", 404);
+
+    const body = (request.body as Record<string, any>) || {};
+    const payload = {
+      ...body,
+      storeId,
+      slug: body.slug || (body.name ? slugify(body.name) : undefined),
+    };
+
+    const parsed = categorySchema.safeParse(payload);
+    if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
+
+    try {
+      const category = await categoryService.createCategory(parsed.data, request.user!.userId);
+      return sendSuccess(reply, category, 201);
+    } catch (err: unknown) {
+      return handleRouteError(reply, err);
+    }
+  });
+
+  const createStoreAttributeHandler = async (request: any, reply: any) => {
+    const { storeId } = request.params as { storeId: string };
+    await assertStoreAccess(request.user!, storeId);
+
+    const store = await prisma.store.findUnique({ where: { id: storeId, deletedAt: null } });
+    if (!store) return sendError(reply, "Store not found", 404);
+
+    const payload = {
+      ...(request.body as Record<string, any>),
+      storeId,
+    };
+
+    const parsed = attributeTemplateSchema.safeParse(payload);
+    if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
+
+    try {
+      const template = await attrTemplateService.createAttributeTemplate(parsed.data);
+      return sendSuccess(reply, template, 201);
+    } catch (err: unknown) {
+      return handleRouteError(reply, err);
+    }
+  };
+
+  fastify.post("/stores/:storeId/attributes", createStoreAttributeHandler);
+  fastify.post("/stores/:storeId/attribute-templates", createStoreAttributeHandler);
+
+  const getStoreAttributesHandler = async (request: any, reply: any) => {
+    const { storeId } = request.params as { storeId: string };
+    await assertStoreAccess(request.user!, storeId);
+
+    const store = await prisma.store.findUnique({ where: { id: storeId, deletedAt: null } });
+    if (!store) return sendError(reply, "Store not found", 404);
+
+    const { templates } = await attrTemplateService.listAttributeTemplates({ storeId });
+    return sendSuccess(reply, templates);
+  };
+
+  fastify.get("/stores/:storeId/attributes", getStoreAttributesHandler);
+  fastify.get("/stores/:storeId/attribute-templates", getStoreAttributesHandler);
+
   // ╔═══════════════════════════════════════════════════════════════╗
   // ║  CATEGORIES                                                   ║
   // ╚═══════════════════════════════════════════════════════════════╝
 
   fastify.get("/categories", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
     const storeIdFilter = query.storeId ?? (allowedStoreIds?.length === 1 ? allowedStoreIds[0] : undefined);
     if (allowedStoreIds && storeIdFilter && !allowedStoreIds.includes(storeIdFilter)) {
@@ -256,7 +336,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/products", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
     const storeIdFilter = query.storeId ?? (allowedStoreIds?.length === 1 ? allowedStoreIds[0] : undefined);
     if (allowedStoreIds && storeIdFilter && !allowedStoreIds.includes(storeIdFilter)) {
@@ -393,7 +473,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/coupons", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
     
     const where: any = {};
@@ -655,7 +735,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/attribute-templates", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const { templates, total } = await attrTemplateService.listAttributeTemplates({
       storeId: query.storeId, categoryId: query.categoryId, skip, take,
     });
@@ -711,7 +791,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/audit-logs", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const { logs, total } = await auditLogService.getAuditLogs({
       entity: query.entity,
       entityId: query.entityId,
@@ -728,7 +808,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/orders", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
 
     const where: any = {};
@@ -1067,16 +1147,18 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // ║  INVENTORY                                                     ║
   // ╚═══════════════════════════════════════════════════════════════╝
 
-  fastify.get("/inventory", async (request, reply) => {
+    fastify.get("/inventory", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
 
+    const baseVariantWhere = {
+      deletedAt: null,
+      product: { deletedAt: null, ...(allowedStoreIds && { storeId: { in: allowedStoreIds } }) },
+    };
+
     const where: any = {
-      variant: {
-        deletedAt: null,
-        product: { deletedAt: null, ...(allowedStoreIds && { storeId: { in: allowedStoreIds } }) },
-      },
+      variant: baseVariantWhere,
     };
     
     if (query.search) {
@@ -1089,10 +1171,11 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       };
     }
     if (query.lowStock === "true") {
-      where.quantity = { lte: 10 };
+      const threshold = query.threshold ? parseInt(query.threshold, 10) || 10 : 10;
+      where.quantity = { gt: 0, lte: threshold };
     }
 
-    const [items, total] = await Promise.all([
+    const [items, total, totalItems, lowStockCount, outOfStockCount] = await Promise.all([
       prisma.inventory.findMany({
         where,
         skip,
@@ -1108,20 +1191,55 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
         },
       }),
       prisma.inventory.count({ where }),
+      prisma.inventory.count({ where: { variant: baseVariantWhere } }),
+      prisma.inventory.count({ where: { quantity: { gt: 0, lte: 10 }, variant: baseVariantWhere } }),
+      prisma.inventory.count({ where: { quantity: 0, variant: baseVariantWhere } }),
     ]);
 
-    return sendPaginated(reply, items.map(item => ({
+    const formattedItems = items.map(item => ({
       ...item,
       lowStockThreshold: 10,
-    })), total, Math.floor(skip / take) + 1, take);
+    }));
+
+    const safeLimit = Math.max(1, take);
+    const currentPage = Math.floor(skip / safeLimit) + 1;
+    const totalPages = Math.ceil(total / safeLimit) || 1;
+
+    return reply.status(200).send({
+      success: true,
+      data: formattedItems,
+      totalItems,
+      lowStockCount,
+      outOfStockCount,
+      meta: {
+        page: currentPage,
+        limit: safeLimit,
+        total,
+        totalPages,
+        totalItems,
+        lowStockCount,
+        outOfStockCount,
+      },
+    });
   });
 
-  fastify.patch("/inventory/:variantId", async (request, reply) => {
+    fastify.patch("/inventory/:variantId", async (request, reply) => {
     const { variantId } = request.params as { variantId: string };
     const { quantity, type, note } = (request.body as { quantity?: number; type?: string; note?: string }) || {};
 
-    if (quantity === undefined || quantity === null || typeof quantity !== "number" || isNaN(quantity) || quantity < 0 || !Number.isInteger(quantity)) {
-      return sendError(reply, "A valid non-negative integer quantity is required", 400);
+    if (typeof quantity === "number" && quantity < 0) {
+      return sendError(reply, "Negative quantity not allowed", 400);
+    }
+
+    if (
+      quantity === undefined ||
+      quantity === null ||
+      typeof quantity !== "number" ||
+      isNaN(quantity) ||
+      !Number.isInteger(quantity) ||
+      quantity > 2147483647
+    ) {
+      return sendError(reply, "A valid non-negative integer quantity within supported range (max 2147483647) is required", 400);
     }
 
     try {
@@ -1159,6 +1277,17 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
           },
         });
 
+        if (quantity <= 10) {
+          await tx.notificationHistory.create({
+            data: {
+              userId: request.user!.userId,
+              title: "Low Stock Alert",
+              body: `Stock for variant ${inv.variant.sku || inv.variant.product.name} has fallen to ${quantity} units (threshold: 10).`,
+              url: `/admin/inventory?search=${encodeURIComponent(inv.variant.sku || "")}`,
+            },
+          });
+        }
+
         return result;
       });
 
@@ -1182,7 +1311,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/shipments", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
 
     const where: any = { deletedAt: null };
@@ -1230,6 +1359,15 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     return sendPaginated(reply, shipments, total, Math.floor(skip / take) + 1, take);
   });
 
+  function isValidHttpUrl(urlStr: string): boolean {
+    try {
+      const parsed = new URL(urlStr);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
   fastify.patch("/shipments/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as Record<string, unknown>;
@@ -1249,15 +1387,49 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
         }
       }
 
+      // Bug 51: Validate status against OrderShipmentStatus enum
+      if (body.status !== undefined) {
+        if (typeof body.status !== "string" || !Object.values(OrderShipmentStatus).includes(body.status as OrderShipmentStatus)) {
+          return sendError(reply, "Invalid shipment status", 400);
+        }
+      }
+
+      // Bug 52: Prevent backward transitions from DELIVERED to SHIPPED or PENDING
+      if (existing.status === "DELIVERED" && body.status && body.status !== "DELIVERED") {
+        return sendError(reply, "Invalid shipment status transition", 400);
+      }
+
+      // Bug 45 & 54: Validate trackingUrl
+      if (body.trackingUrl !== undefined && body.trackingUrl !== null && body.trackingUrl !== "") {
+        if (typeof body.trackingUrl !== "string" || !isValidHttpUrl(body.trackingUrl.trim())) {
+          return sendError(reply, "Invalid tracking URL", 400);
+        }
+      }
+
       const data: any = {};
       if (body.status !== undefined) data.status = body.status;
       if (body.courierName !== undefined) data.courierName = body.courierName;
       if (body.trackingNumber !== undefined) data.trackingNumber = body.trackingNumber;
-      if (body.trackingUrl !== undefined) data.trackingUrl = body.trackingUrl;
+      if (body.trackingUrl !== undefined) data.trackingUrl = body.trackingUrl ? (body.trackingUrl as string).trim() : null;
       if (body.status === "SHIPPED" && !existing.shippedAt) data.shippedAt = new Date();
       if (body.status === "DELIVERED" && !existing.deliveredAt) data.deliveredAt = new Date();
 
       const updated = await prisma.orderShipment.update({ where: { id }, data });
+
+      // Bug 47: When shipment is marked DELIVERED, synchronize the parent order status
+      if (body.status === "DELIVERED") {
+        try {
+          const currentOrder = await prisma.order.findUnique({ where: { id: existing.orderId } });
+          if (currentOrder && currentOrder.status === "RECEIVED") {
+            await orderService.updateOrderStatus(existing.orderId, "SHIPPED", request.user!.userId);
+          }
+          if (currentOrder && currentOrder.status !== "DELIVERED" && currentOrder.status !== "SUCCESS") {
+            await orderService.updateOrderStatus(existing.orderId, "DELIVERED", request.user!.userId);
+          }
+        } catch (orderErr) {
+          fastify.log.warn({ err: orderErr }, "Parent order could not be transitioned to DELIVERED");
+        }
+      }
 
       if (body.status && body.status !== existing.status) {
         await prisma.shipmentLog.create({
@@ -1287,31 +1459,96 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       courierName?: string;
       trackingNumber?: string;
       trackingUrl?: string;
+      status?: string;
     }) || {};
 
-    if (!body.orderId) return sendError(reply, "orderId is required", 400);
+    // Bug 53: Validate required fields
+    if (!body.orderId || typeof body.orderId !== "string" || !body.orderId.trim()) {
+      return sendError(reply, "orderId is required", 400);
+    }
+    if (!body.courierName || typeof body.courierName !== "string" || !body.courierName.trim()) {
+      return sendError(reply, "Courier name is required", 400);
+    }
+    if (!body.trackingNumber || typeof body.trackingNumber !== "string" || !body.trackingNumber.trim()) {
+      return sendError(reply, "Tracking number is required", 400);
+    }
+
+    // Bug 45 & 54: Validate trackingUrl if provided
+    if (body.trackingUrl !== undefined && body.trackingUrl !== null && body.trackingUrl !== "") {
+      if (typeof body.trackingUrl !== "string" || !isValidHttpUrl(body.trackingUrl.trim())) {
+        return sendError(reply, "Invalid tracking URL", 400);
+      }
+    }
 
     try {
-      const order = await prisma.order.findUnique({ where: { id: body.orderId } });
+      const order = await prisma.order.findUnique({ where: { id: body.orderId.trim() } });
       if (!order) return sendError(reply, "Order not found", 404);
 
+      // Bug 49: Reject shipments for cancelled orders
+      if (order.status === "CANCELLED") {
+        return sendError(reply, "Cannot create shipment for a cancelled order", 400);
+      }
+
+      // Bug 50: Reject shipments for unconfirmed/PENDING orders
+      if (order.status === "PENDING") {
+        return sendError(reply, "Cannot create shipment for an unconfirmed order", 400);
+      }
+
+      const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
+      if (allowedStoreIds) {
+        const orderWithItems = await prisma.order.findUnique({
+          where: { id: order.id },
+          include: { items: { include: { variant: { include: { product: true } } } } },
+        });
+        const orderStoreIds = orderWithItems?.items.map(i => i.variant?.product?.storeId).filter(Boolean) || [];
+        if (!orderStoreIds.some(sid => allowedStoreIds.includes(sid))) {
+          return sendError(reply, "You do not have access to this order's shipment", 403);
+        }
+      }
+
+      // Bug 48: Prevent duplicate active shipments for the same order
+      const existingShipment = await prisma.orderShipment.findFirst({
+        where: {
+          orderId: order.id,
+          status: { notIn: ["RETURNED", "LOST"] },
+          deletedAt: null,
+        },
+      });
+      if (existingShipment) {
+        return sendError(reply, "Shipment already exists for this order", 409);
+      }
+
+      // Bug 46: Create shipment with status SHIPPED and transition parent order to SHIPPED
+      const shipmentStatus: OrderShipmentStatus = "SHIPPED";
       const shipment = await prisma.orderShipment.create({
         data: {
-          orderId: body.orderId,
-          courierName: body.courierName ?? null,
-          trackingNumber: body.trackingNumber ?? null,
-          trackingUrl: body.trackingUrl ?? null,
-          status: "PENDING",
+          orderId: order.id,
+          courierName: body.courierName.trim(),
+          trackingNumber: body.trackingNumber.trim(),
+          trackingUrl: body.trackingUrl?.trim() || null,
+          status: shipmentStatus,
+          shippedAt: new Date(),
         },
       });
 
+      // Update parent order to SHIPPED
+      try {
+        if (order.status === "RECEIVED") {
+          await orderService.updateOrderStatus(order.id, "SHIPPED", request.user!.userId);
+        }
+      } catch (orderErr) {
+        fastify.log.warn({ err: orderErr }, "Could not update parent order to SHIPPED");
+      }
+
       await prisma.shipmentLog.create({
         data: {
-          orderId: body.orderId,
+          orderId: order.id,
           shipmentId: shipment.id,
           adminId: request.user!.userId,
           action: "CREATED",
-          toStatus: "PENDING",
+          toStatus: shipmentStatus,
+          courierName: shipment.courierName,
+          trackingNumber: shipment.trackingNumber,
           note: `Shipment created for order ${order.orderNumber}`,
         },
       });
@@ -1328,7 +1565,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/notifications", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
 
     const where: any = { userId: request.user!.userId };
     if (query.unreadOnly === "true") where.isRead = false;
@@ -1368,9 +1605,9 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // ║  CUSTOMERS                                                     ║
   // ╚═══════════════════════════════════════════════════════════════╝
 
-  fastify.get("/customers", async (request, reply) => {
+    fastify.get("/customers", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
 
     const where: any = { role: "CUSTOMER" };
@@ -1402,14 +1639,153 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
           isEmailVerified: true,
           lastLoginAt: true,
           createdAt: true,
-          _count: { select: { orders: true } },
+          _count: {
+            select: {
+              orders: {
+                where: {
+                  deletedAt: null,
+                  status: { notIn: ["CANCELLED", "PENDING"] },
+                },
+              },
+            },
+          },
         },
       }),
       prisma.user.count({ where }),
     ]);
 
-    return sendPaginated(reply, customers, total, Math.floor(skip / take) + 1, take);
+    const formattedCustomers = customers.map((c) => {
+      const orderCount = c._count?.orders ?? 0;
+      return {
+        ...c,
+        orderCount,
+        _count: { orders: orderCount },
+      };
+    });
+
+    return sendPaginated(reply, formattedCustomers, total, Math.floor(skip / take) + 1, take);
   });
+
+  // Bug 62: Individual Customer Details endpoint
+  fastify.get("/customers/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
+
+    const customer = await prisma.user.findFirst({
+      where: { id, role: "CUSTOMER" },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        fullName: true,
+        avatar: true,
+        isActive: true,
+        isEmailVerified: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+        addresses: true,
+        orders: {
+          where: {
+            deletedAt: null,
+            ...(allowedStoreIds ? { items: { some: { variant: { product: { storeId: { in: allowedStoreIds } } } } } } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          include: {
+            items: {
+              include: {
+                variant: {
+                  include: {
+                    product: { select: { id: true, name: true, slug: true } },
+                  },
+                },
+              },
+            },
+            shipments: true,
+            payments: true,
+          },
+        },
+      },
+    });
+
+    if (!customer) {
+      return sendError(reply, "Customer not found", 404);
+    }
+
+    const eligibleOrders = customer.orders.filter(
+      (o) => o.status !== "CANCELLED" && o.status !== "PENDING"
+    );
+
+    const lifetimeValue = eligibleOrders.reduce(
+      (acc, order) => acc + Number(order.totalAmount || 0),
+      0
+    );
+
+    return sendSuccess(reply, {
+      ...customer,
+      orderCount: eligibleOrders.length,
+      lifetimeValue,
+    });
+  });
+
+  // Bug 62: Customer Suspension & Status Update endpoints
+  const updateCustomerStatusHandler = async (request: any, reply: any) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { isActive?: boolean; status?: string };
+
+    const customer = await prisma.user.findFirst({
+      where: { id, role: "CUSTOMER" },
+    });
+    if (!customer) {
+      return sendError(reply, "Customer not found", 404);
+    }
+
+    let nextIsActive = customer.isActive;
+    if (typeof body.isActive === "boolean") {
+      nextIsActive = body.isActive;
+    } else if (typeof body.status === "string") {
+      const s = body.status.toUpperCase();
+      if (s === "SUSPENDED" || s === "INACTIVE" || s === "DEACTIVATED") {
+        nextIsActive = false;
+      } else if (s === "ACTIVE") {
+        nextIsActive = true;
+      } else {
+        return sendError(reply, "Invalid status. Must be ACTIVE or SUSPENDED", 400);
+      }
+    } else {
+      return sendError(reply, "Field isActive (boolean) or status (string) is required", 400);
+    }
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data: { isActive: nextIsActive },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        fullName: true,
+        avatar: true,
+        isActive: true,
+        isEmailVerified: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    await auditLogService.logAction({
+      adminId: request.user!.userId,
+      action: "UPDATE",
+      entity: "USER",
+      entityId: id,
+      entityName: `Customer ${customer.email} status -> ${nextIsActive ? "ACTIVE" : "SUSPENDED"}`,
+    });
+
+    return sendSuccess(reply, updated);
+  };
+
+  fastify.patch("/customers/:id", updateCustomerStatusHandler);
+  fastify.put("/customers/:id/status", updateCustomerStatusHandler);
 
   // ╔═══════════════════════════════════════════════════════════════╗
   // ║  ANALYTICS                                                     ║
@@ -1626,7 +2002,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/reviews", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const where: any = {};
 
     if (query.status === "APPROVED") where.isApproved = true;
@@ -1687,7 +2063,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/payments", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const where: any = {};
 
     if (query.search) {

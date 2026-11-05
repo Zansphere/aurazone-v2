@@ -122,15 +122,39 @@ export const buildSku = (...parts: (string | undefined)[]): string =>
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
 export const parsePagination = (
-  skip: unknown,
-  take: unknown,
-  maxTake = 100
+  skipOrQuery?: unknown,
+  take?: unknown,
+  maxTake = 100,
+  pageArg?: unknown
 ): { skip: number; take: number } => {
-  const s = Number(skip);
-  const t = Number(take);
+  let skip: unknown = skipOrQuery;
+  let t = take;
+  let page: unknown = pageArg;
+  const limit: number = typeof maxTake === "number" ? maxTake : 100;
+
+  if (typeof skipOrQuery === "object" && skipOrQuery !== null) {
+    const opts = skipOrQuery as Record<string, unknown>;
+    skip = opts.skip;
+    t = opts.take ?? opts.limit;
+    page = opts.page;
+  }
+
+  const numTake = Number(t);
+  const finalTake = Number.isFinite(numTake) && numTake > 0 ? Math.min(numTake, limit) : 10;
+
+  const numSkip = Number(skip);
+  const numPage = Number(page);
+
+  let finalSkip = 0;
+  if (Number.isFinite(numSkip) && numSkip >= 0) {
+    finalSkip = numSkip;
+  } else if (Number.isFinite(numPage) && numPage > 0) {
+    finalSkip = Math.floor((numPage - 1) * finalTake);
+  }
+
   return {
-    skip: Number.isFinite(s) && s >= 0 ? s : 0,
-    take: Number.isFinite(t) && t > 0 ? Math.min(t, maxTake) : 10,
+    skip: finalSkip,
+    take: finalTake,
   };
 };
 

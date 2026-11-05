@@ -7,7 +7,7 @@ const categoryRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── GET / — List categories (public, filter by store) ────────
   fastify.get("/", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const cacheKey = `cache:categories:${query.storeId || "all"}:${query.rootOnly || "all"}:${skip}:${take}`;
 
     if (fastify.redis) {

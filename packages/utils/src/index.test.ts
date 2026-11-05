@@ -46,6 +46,12 @@ describe('Utils', () => {
     it('should cap take at maxTake (100)', () => {
       expect(parsePagination(0, 500)).toEqual({ skip: 0, take: 100 });
     });
+
+    it('should calculate skip from page number', () => {
+      expect(parsePagination(undefined, 20, 100, 2)).toEqual({ skip: 20, take: 20 });
+      expect(parsePagination(undefined, 20, 100, '3')).toEqual({ skip: 40, take: 20 });
+      expect(parsePagination({ page: 2, take: 20 })).toEqual({ skip: 20, take: 20 });
+    });
   });
 
   describe('calcDiscountPercent', () => {

@@ -35,7 +35,7 @@ const productRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── GET / — List products (public) ───────────────────────────
   fastify.get("/", async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
 
     const { products, total } = await productService.listProducts({
       storeId: query.storeId,

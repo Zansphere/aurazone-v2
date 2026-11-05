@@ -446,7 +446,7 @@ const orderRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get("/", { preHandler: [optionalAuth] }, async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
     const userId = request.user?.userId;
     let sessionId = request.headers["x-guest-session"] as string | undefined;
 

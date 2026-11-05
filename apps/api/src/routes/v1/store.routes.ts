@@ -9,7 +9,7 @@ const storeRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── GET / — List all active stores (public) ──────────────────
   fastify.get("/", { preHandler: [optionalAuth] }, async (request, reply) => {
     const query = request.query as Record<string, string>;
-    const { skip, take } = parsePagination(query.skip, query.take);
+    const { skip, take } = parsePagination(query.skip, query.take, 100, query.page);
 
     const { stores, total } = await storeService.listStores({
       activeOnly: true,

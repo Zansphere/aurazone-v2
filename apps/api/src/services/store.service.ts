@@ -197,11 +197,18 @@ export async function deleteStore(id: string, adminId?: string): Promise<void> {
     throw Object.assign(new Error("Store not found"), { statusCode: 404 });
   }
 
-  // Soft delete — mark as deleted instead of hard delete
-  await prisma.store.update({
-    where: { id },
-    data: { deletedAt: new Date(), deletedBy: adminId ?? null, isActive: false },
-  });
+  // Bug 63: Atomically soft-delete and deactivate store and its associated child products
+  const now = new Date();
+  await prisma.$transaction([
+    prisma.store.update({
+      where: { id },
+      data: { deletedAt: now, deletedBy: adminId ?? null, isActive: false },
+    }),
+    prisma.product.updateMany({
+      where: { storeId: id, deletedAt: null },
+      data: { deletedAt: now, deletedBy: adminId ?? null, isActive: false },
+    }),
+  ]);
 
   if (adminId) {
     await logAction({

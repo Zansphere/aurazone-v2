@@ -560,7 +560,17 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       return sendError(reply, "discountType must be PERCENTAGE or FIXED_AMOUNT", 400);
     }
     if (body.discountValue === undefined || body.discountValue === null || Number(body.discountValue) <= 0 || isNaN(Number(body.discountValue))) {
-      return sendError(reply, "discountValue must be a positive number", 400);
+      return sendError(reply, "Discount value must be greater than zero", 400);
+    }
+    if (body.discountType === "PERCENTAGE" && Number(body.discountValue) > 100) {
+      return sendError(reply, "Percentage discount must be between 1 and 100", 400);
+    }
+    if (body.startDate && body.endDate) {
+      const start = new Date(body.startDate);
+      const end = new Date(body.endDate);
+      if (end <= start) {
+        return sendError(reply, "End date must be after start date", 400);
+      }
     }
 
     const cleanCode = body.code.trim().toUpperCase();
@@ -570,7 +580,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const existing = await prisma.coupon.findUnique({ where: { code: cleanCode } });
-    if (existing) return sendError(reply, "Coupon code already exists", 400);
+    if (existing) return sendError(reply, "Coupon code already exists", 409);
 
     const isProductSpecific = Boolean(body.isProductSpecific);
     const productIds: string[] = Array.isArray(body.productIds) ? body.productIds : [];
@@ -641,6 +651,35 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     }
     if (allowedStoreIds && body.storeId && !allowedStoreIds.includes(body.storeId)) {
       return sendError(reply, "You cannot reassign to this store", 403);
+    }
+
+    if (body.discountValue !== undefined) {
+      if (body.discountValue === null || Number(body.discountValue) <= 0 || isNaN(Number(body.discountValue))) {
+        return sendError(reply, "Discount value must be greater than zero", 400);
+      }
+    }
+    const effDiscountType = body.discountType || existing.discountType;
+    const effDiscountValue = body.discountValue !== undefined ? Number(body.discountValue) : Number(existing.discountValue);
+    if (effDiscountType === "PERCENTAGE" && effDiscountValue > 100) {
+      return sendError(reply, "Percentage discount must be between 1 and 100", 400);
+    }
+
+    const effStartDate = body.startDate !== undefined ? (body.startDate ? new Date(body.startDate) : null) : existing.startDate;
+    const effEndDate = body.endDate !== undefined ? (body.endDate ? new Date(body.endDate) : null) : existing.endDate;
+    if (effStartDate && effEndDate && new Date(effEndDate) <= new Date(effStartDate)) {
+      return sendError(reply, "End date must be after start date", 400);
+    }
+
+    if (body.usageLimit !== undefined && body.usageLimit !== null) {
+      const newLimit = Number(body.usageLimit);
+      if (!isNaN(newLimit) && newLimit < existing.usedCount) {
+        return sendError(reply, "Usage limit cannot be lower than the existing redemption count", 400);
+      }
+    }
+
+    if (body.code && body.code.trim().toUpperCase() !== existing.code) {
+      const dup = await prisma.coupon.findUnique({ where: { code: body.code.trim().toUpperCase() } });
+      if (dup) return sendError(reply, "Coupon code already exists", 409);
     }
 
     const isProductSpecific = body.isProductSpecific !== undefined ? Boolean(body.isProductSpecific) : existing.isProductSpecific;

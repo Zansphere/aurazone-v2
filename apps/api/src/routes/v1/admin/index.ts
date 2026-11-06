@@ -10,6 +10,7 @@ import * as orderService from "../../../services/order.service.js";
 import { getAvailableNextStatuses } from "../../../services/orderStateMachine.js";
 import * as attrTemplateService from "../../../services/attributeTemplate.service.js";
 import * as auditLogService from "../../../services/auditLog.service.js";
+import { createStaffNotification } from "../../../services/notification.service.js";
 import { prisma, Prisma, OrderStatus, OrderShipmentStatus } from "@aurazone/database";
 
 const adminRoutes: FastifyPluginAsync = async (fastify) => {
@@ -1397,6 +1398,13 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
               url: `/admin/inventory?search=${encodeURIComponent(inv.variant.sku || "")}`,
             },
           });
+
+          await createStaffNotification(tx, {
+            storeIds: [inv.variant.product.storeId],
+            title: "Low Stock Alert",
+            body: `Stock for variant ${inv.variant.sku || inv.variant.product.name} has fallen to ${quantity} units (threshold: 10).`,
+            url: `/admin/inventory?search=${encodeURIComponent(inv.variant.sku || "")}`,
+          });
         }
 
         return result;
@@ -1697,6 +1705,14 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.patch("/notifications/:id/read", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const notification = await prisma.notificationHistory.findUnique({
+      where: { id },
+    });
+    if (!notification) return sendError(reply, "Notification not found", 404);
+    if (notification.userId !== request.user!.userId) {
+      return sendError(reply, "Forbidden: You cannot modify another user's notification", 403);
+    }
+
     await prisma.notificationHistory.update({
       where: { id },
       data: { isRead: true },
@@ -2093,11 +2109,26 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.put("/notification-preferences", async (request, reply) => {
-    const body = request.body as Record<string, boolean>;
+    if (!request.body || typeof request.body !== "object" || Array.isArray(request.body)) {
+      return sendError(reply, "Invalid request body", 400);
+    }
+    const body = request.body as Record<string, unknown>;
+    const allowedFields = ["newOrders", "orderStatusChange", "lowStock", "promotions", "otherEvents"];
+    const updateData: Record<string, boolean> = {};
+
+    for (const [key, val] of Object.entries(body)) {
+      if (allowedFields.includes(key)) {
+        if (typeof val !== "boolean") {
+          return sendError(reply, `Field '${key}' must be a boolean; nested channel objects are not supported`, 400);
+        }
+        updateData[key] = val;
+      }
+    }
+
     const prefs = await prisma.notificationPreferences.upsert({
       where: { userId: request.user!.userId },
-      create: { userId: request.user!.userId, ...body },
-      update: body,
+      create: { userId: request.user!.userId, ...updateData },
+      update: updateData,
     });
     return sendSuccess(reply, prefs);
   });

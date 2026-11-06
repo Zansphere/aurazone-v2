@@ -10,6 +10,7 @@ import {
 } from "@aurazone/utils";
 import crypto from "crypto";
 import { commitOrderInventory, restockInventory } from "./inventory.service.js";
+import { createStaffNotification } from "./notification.service.js";
 import { transitionOrderStatus } from "./orderStateMachine.js";
 import { env } from "../config/env.js";
 
@@ -372,6 +373,14 @@ export async function createOrderFromCart(
       },
     });
 
+    const storeIds = Array.from(new Set(cart.items.map((i) => i.variant.product.storeId).filter(Boolean)));
+    await createStaffNotification(tx, {
+      storeIds,
+      title: "New Order Placed",
+      body: `Order #${newOrder.orderNumber} placed for ₹${totalAmountDecimal}.`,
+      url: `/admin/orders?search=${encodeURIComponent(newOrder.orderNumber)}`,
+    });
+
     return newOrder;
   },
   {
@@ -688,6 +697,13 @@ export async function createDirectOrder(
             directCheckout: true,
           },
         },
+      });
+
+      await createStaffNotification(tx, {
+        storeIds: [variant.product.storeId],
+        title: "New Order Placed",
+        body: `Order #${newOrder.orderNumber} placed for ₹${totalAmountDecimal}.`,
+        url: `/admin/orders?search=${encodeURIComponent(newOrder.orderNumber)}`,
       });
 
       return newOrder;

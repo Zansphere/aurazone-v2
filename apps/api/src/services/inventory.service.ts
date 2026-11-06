@@ -1,4 +1,5 @@
 import { prisma, type InventoryLogType, type Prisma, type ReservationStatus } from "@aurazone/database";
+import { createStaffNotification } from "./notification.service.js";
 
 const RESERVATION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -226,6 +227,21 @@ export async function commitOrderInventory(
     }
 
     const currentInv = result[0];
+
+    if (currentInv.quantity <= 10 && tx.productVariant?.findUnique) {
+      const v = await tx.productVariant.findUnique({
+        where: { id: item.variantId },
+        include: { product: true },
+      });
+      if (v) {
+        await createStaffNotification(tx, {
+          storeIds: [v.product.storeId],
+          title: "Low Stock Alert",
+          body: `Stock for variant ${v.sku || v.product.name} has fallen to ${currentInv.quantity} units (threshold: 10).`,
+          url: `/admin/inventory?search=${encodeURIComponent(v.sku || "")}`,
+        });
+      }
+    }
 
     logsToCreate.push({
       variantId: item.variantId,

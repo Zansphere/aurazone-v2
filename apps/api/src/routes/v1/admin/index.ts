@@ -1925,6 +1925,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       // Total revenue (delivered/success only)
       prisma.order.aggregate({
         _sum: { totalAmount: true },
+        _count: { id: true },
         where: { status: { in: ["DELIVERED", "SUCCESS"] }, createdAt: { gte: since }, ...orderWhere },
       }),
 
@@ -1946,7 +1947,10 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
             JOIN "OrderItem" oi ON o.id = oi.order_id
             JOIN "ProductVariant" pv ON oi.variant_id = pv.id
             JOIN "Product" p ON pv.product_id = p.id
-            WHERE o.created_at >= ${since} AND p.store_id IN (${Prisma.join(allowedStoreIds)})
+            WHERE o.created_at >= ${since}
+              AND o.status IN ('DELIVERED', 'SUCCESS')
+              AND o.deleted_at IS NULL
+              AND p.store_id IN (${Prisma.join(allowedStoreIds)})
             GROUP BY DATE(o.created_at)
             ORDER BY day ASC`
         : prisma.$queryRaw<Array<{ day: string; revenue: number; orders: number }>>`
@@ -1955,17 +1959,26 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
                    COUNT(DISTINCT o.id)::int as orders
             FROM "Order" o
             WHERE o.created_at >= ${since}
+              AND o.status IN ('DELIVERED', 'SUCCESS')
+              AND o.deleted_at IS NULL
             GROUP BY DATE(o.created_at)
             ORDER BY day ASC`,
 
-      // Top products by order count
+      // Top products by revenue during the reporting period
       prisma.orderItem.groupBy({
         by: ["productName", "storeName"],
-        where: allowedStoreIds ? { variant: { product: { storeId: { in: allowedStoreIds } } } } : undefined,
+        where: {
+          order: {
+            createdAt: { gte: since },
+            status: { in: ["DELIVERED", "SUCCESS"] },
+            deletedAt: null,
+          },
+          ...(allowedStoreIds ? { variant: { product: { storeId: { in: allowedStoreIds } } } } : {}),
+        },
         _count: { id: true },
         _sum: { subtotal: true },
-        orderBy: { _count: { id: "desc" } },
-        take: 10,
+        orderBy: { _sum: { subtotal: "desc" } },
+        take: 5,
       }),
 
       // Revenue per store
@@ -1984,9 +1997,15 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       }),
     ]);
 
+    const revPaise = Number(totalRevenue._sum.totalAmount ?? 0);
+    const qualifyingCount = totalRevenue._count?.id ?? 0;
+    const aov = qualifyingCount > 0 ? Number((revPaise / qualifyingCount).toFixed(2)) : 0;
+
     return sendSuccess(reply, {
       period: { days: daysBack, since: since.toISOString() },
-      totalRevenue: totalRevenue._sum.totalAmount ?? 0,
+      totalRevenue: revPaise,
+      aov,
+      averageOrderValue: aov,
       ordersByStatus: ordersByStatus.map((g) => ({
         status: g.status,
         count: g._count.id,

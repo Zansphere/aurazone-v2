@@ -199,7 +199,7 @@ export const createDirectOrderSchema = z.object({
 // ─── Storefront ───────────────────────────────────────────────────────────────
 export const storefrontSectionSchema = z.object({
   storeId: z.string().uuid().optional().nullable(),
-  page: z.string().min(1).default("home"),
+  page: z.string({ required_error: "Page is required" }).min(1, "Page is required"),
   type: z.enum([
     "HERO_BANNER",
     "PRODUCT_CAROUSEL",

@@ -972,6 +972,58 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // ║  STOREFRONT CMS                                               ║
   // ╚═══════════════════════════════════════════════════════════════╝
 
+  function validateStorefrontContent(type: string, content: Record<string, unknown> | undefined): string | null {
+    if (!content || typeof content !== "object") return null;
+
+    const checkLinks = (obj: any): string | null => {
+      if (!obj || typeof obj !== "object") return null;
+      for (const [key, val] of Object.entries(obj)) {
+        if (typeof val === "string") {
+          const trimmed = val.trim().toLowerCase();
+          if (trimmed.startsWith("javascript:") || trimmed.includes("javascript:")) {
+            return "Links cannot contain javascript: protocol";
+          }
+        } else if (typeof val === "object") {
+          const err = checkLinks(val);
+          if (err) return err;
+        }
+      }
+      return null;
+    };
+
+    const linkErr = checkLinks(content);
+    if (linkErr) return linkErr;
+
+    if (type === "CUSTOM_HTML") {
+      const allStrings: string[] = [];
+      const collectStrings = (obj: any) => {
+        if (!obj) return;
+        if (typeof obj === "string") allStrings.push(obj);
+        else if (typeof obj === "object") {
+          for (const val of Object.values(obj)) collectStrings(val);
+        }
+      };
+      collectStrings(content);
+
+      for (const str of allStrings) {
+        if (/<script\b/i.test(str)) {
+          return "Custom HTML cannot contain script tags";
+        }
+        if (/\bon\w+\s*=/i.test(str)) {
+          return "Custom HTML cannot contain inline event handlers";
+        }
+        if (/javascript:/i.test(str)) {
+          return "Custom HTML cannot contain javascript: links";
+        }
+        if (/@import\b/i.test(str)) {
+          return "Custom HTML cannot contain external CSS @import statements";
+        }
+      }
+    }
+
+    return null;
+  }
+
   fastify.get("/storefront", async (request, reply) => {
     const query = request.query as Record<string, string>;
     const allowedStoreIds = await getManagerStoreIds(request.user!.userId, request.user!.role);
@@ -993,9 +1045,24 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     return sendSuccess(reply, sections);
   });
 
+  fastify.get("/storefront/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const section = await prisma.storefrontSection.findUnique({
+      where: { id },
+    });
+    if (!section || section.deletedAt) {
+      return sendError(reply, "Section not found", 404);
+    }
+    await assertStoreAccess(request.user!, section.storeId);
+    return sendSuccess(reply, section);
+  });
+
   fastify.post("/storefront", async (request, reply) => {
     const parsed = storefrontSectionSchema.safeParse(request.body);
     if (!parsed.success) return sendError(reply, formatZodError(parsed.error), 400);
+
+    const contentErr = validateStorefrontContent(parsed.data.type, parsed.data.content as any);
+    if (contentErr) return sendError(reply, contentErr, 400);
 
     await assertStoreAccess(request.user!, parsed.data.storeId);
 
@@ -1007,7 +1074,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     const section = await prisma.storefrontSection.create({
       data: {
         storeId: parsed.data.storeId ?? null,
-        page: parsed.data.page ?? "home",
+        page: parsed.data.page,
         type: parsed.data.type as any,
         title: parsed.data.title ?? null,
         subtitle: parsed.data.subtitle ?? null,
@@ -1034,8 +1101,13 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const body = request.body as Record<string, unknown>;
     const existing = await prisma.storefrontSection.findUnique({ where: { id } });
-    if (!existing) return sendError(reply, "Section not found", 404);
+    if (!existing || existing.deletedAt) return sendError(reply, "Section not found", 404);
     await assertStoreAccess(request.user!, existing.storeId);
+
+    const targetType = (body.type as string) || existing.type;
+    const targetContent = (body.content !== undefined ? body.content : (body.config !== undefined ? body.config : existing.content)) as Record<string, unknown>;
+    const contentErr = validateStorefrontContent(targetType, targetContent);
+    if (contentErr) return sendError(reply, contentErr, 400);
     const section = await prisma.storefrontSection.update({
       where: { id },
       data: {

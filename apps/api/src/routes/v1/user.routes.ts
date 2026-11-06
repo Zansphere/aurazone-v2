@@ -22,24 +22,40 @@ const userRoutes: FastifyPluginAsync = async (fastify) => {
     return sendSuccess(reply, user);
   });
 
-  fastify.put("/profile", async (request, reply) => {
+  const updateProfileHandler = async (request: any, reply: any) => {
     const body = request.body as { fullName?: string; avatar?: string; phone?: string };
+    if (body.fullName !== undefined) {
+      if (typeof body.fullName !== "string" || !body.fullName.trim()) {
+        return sendError(reply, "Full name cannot be empty", 400);
+      }
+    }
     const user = await prisma.user.update({
       where: { id: request.user!.userId },
       data: {
-        ...(body.fullName !== undefined && { fullName: body.fullName }),
+        ...(body.fullName !== undefined && { fullName: body.fullName.trim() }),
         ...(body.avatar !== undefined && { avatar: body.avatar }),
         ...(body.phone !== undefined && { phone: body.phone }),
       },
       select: { id: true, email: true, phone: true, fullName: true, avatar: true, role: true, isEmailVerified: true },
     });
     return sendSuccess(reply, user);
-  });
+  };
 
-  fastify.put("/change-password", async (request, reply) => {
-    const { currentPassword, newPassword } = request.body as { currentPassword?: string; newPassword?: string };
+  fastify.put("/profile", updateProfileHandler);
+  fastify.patch("/profile", updateProfileHandler);
+
+  const changePasswordHandler = async (request: any, reply: any) => {
+    const { currentPassword, newPassword, confirmPassword } = (request.body as {
+      currentPassword?: string;
+      newPassword?: string;
+      confirmPassword?: string;
+    }) || {};
+
     if (!currentPassword || !newPassword) {
       return sendError(reply, "Current password and new password are required", 400);
+    }
+    if (confirmPassword !== undefined && confirmPassword !== newPassword) {
+      return sendError(reply, "New password and confirmation password do not match", 400);
     }
     if (newPassword.length < 6) {
       return sendError(reply, "New password must be at least 6 characters", 400);
@@ -62,7 +78,10 @@ const userRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     return sendSuccess(reply, { message: "Password updated successfully" });
-  });
+  };
+
+  fastify.put("/change-password", changePasswordHandler);
+  fastify.post("/change-password", changePasswordHandler);
 
   fastify.delete("/account", async (request, reply) => {
     const userId = request.user!.userId;

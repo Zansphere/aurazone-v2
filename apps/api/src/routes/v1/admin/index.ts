@@ -2061,12 +2061,17 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     return sendSuccess(reply, user);
   });
 
-  fastify.put("/profile", async (request, reply) => {
+  const updateProfileHandler = async (request: any, reply: any) => {
     const body = request.body as { fullName?: string; avatar?: string; phone?: string };
+    if (body.fullName !== undefined) {
+      if (typeof body.fullName !== "string" || !body.fullName.trim()) {
+        return sendError(reply, "Full name cannot be empty", 400);
+      }
+    }
     const updated = await prisma.user.update({
       where: { id: request.user!.userId },
       data: {
-        ...(body.fullName !== undefined && { fullName: body.fullName }),
+        ...(body.fullName !== undefined && { fullName: body.fullName.trim() }),
         ...(body.avatar !== undefined && { avatar: body.avatar }),
         ...(body.phone !== undefined && { phone: body.phone }),
       },
@@ -2076,12 +2081,27 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
     return sendSuccess(reply, updated);
-  });
+  };
 
-  fastify.put("/profile/password", async (request, reply) => {
-    const { currentPassword, newPassword } = request.body as { currentPassword: string; newPassword: string };
-    if (!currentPassword || !newPassword) return sendError(reply, "Both passwords are required", 400);
-    if (newPassword.length < 8) return sendError(reply, "Password must be at least 8 characters", 400);
+  fastify.put("/profile", updateProfileHandler);
+  fastify.patch("/profile", updateProfileHandler);
+
+  const changePasswordHandler = async (request: any, reply: any) => {
+    const { currentPassword, newPassword, confirmPassword } = (request.body as {
+      currentPassword?: string;
+      newPassword?: string;
+      confirmPassword?: string;
+    }) || {};
+
+    if (!currentPassword || !newPassword) {
+      return sendError(reply, "Both passwords are required", 400);
+    }
+    if (confirmPassword !== undefined && confirmPassword !== newPassword) {
+      return sendError(reply, "New password and confirmation password do not match", 400);
+    }
+    if (newPassword.length < 8) {
+      return sendError(reply, "Password must be at least 8 characters", 400);
+    }
 
     const user = await prisma.user.findUnique({ where: { id: request.user!.userId } });
     if (!user?.password) return sendError(reply, "Password not set", 400);
@@ -2094,7 +2114,12 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     await prisma.user.update({ where: { id: user.id }, data: { password: hashed } });
 
     return sendSuccess(reply, { message: "Password updated" });
-  });
+  };
+
+  fastify.put("/profile/password", changePasswordHandler);
+  fastify.post("/profile/password", changePasswordHandler);
+  fastify.post("/change-password", changePasswordHandler);
+  fastify.put("/change-password", changePasswordHandler);
 
   fastify.get("/notification-preferences", async (request, reply) => {
     let prefs = await prisma.notificationPreferences.findUnique({
@@ -2151,8 +2176,14 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.delete("/sessions/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    await prisma.userSession.deleteMany({
-      where: { id, userId: request.user!.userId },
+    const session = await prisma.userSession.findUnique({ where: { id } });
+    if (!session) return sendError(reply, "Session not found", 404);
+    if (session.userId !== request.user!.userId) {
+      return sendError(reply, "Forbidden: You cannot revoke another user's session", 403);
+    }
+
+    await prisma.userSession.delete({
+      where: { id },
     });
     return sendSuccess(reply, { message: "Session revoked" });
   });

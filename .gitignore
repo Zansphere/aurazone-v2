@@ -37,3 +37,8 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# Test reports and outputs
+apps/automation/reports/
+apps/automation/allure-results/
+apps/automation/test-results/

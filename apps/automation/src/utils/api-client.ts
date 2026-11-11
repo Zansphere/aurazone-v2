@@ -8,6 +8,20 @@ export type UserRole = "PUBLIC" | "CUSTOMER" | "STORE_MANAGER" | "SUPER_ADMIN";
 
 const TOKEN_CACHE_FILE = path.resolve(process.cwd(), ".token-cache.json");
 
+function isTokenValid(token?: string): boolean {
+  if (!token) return false;
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+    const now = Math.floor(Date.now() / 1000);
+    // Ensure token is not expired and has at least 30s remaining
+    return typeof payload.exp === "number" && payload.exp - now > 30;
+  } catch {
+    return false;
+  }
+}
+
 function readDiskTokenCache(): Record<string, string> {
   try {
     if (fs.existsSync(TOKEN_CACHE_FILE)) {
@@ -57,12 +71,13 @@ export class ApiClient {
   public async getRealToken(role: UserRole): Promise<string> {
     if (role === "PUBLIC") return "";
     if (this.cachedTokens.has(role)) {
-      return this.cachedTokens.get(role)!;
+      const memToken = this.cachedTokens.get(role)!;
+      if (isTokenValid(memToken)) return memToken;
     }
 
     // Check cross-worker disk cache
     const diskCache = readDiskTokenCache();
-    if (diskCache[role]) {
+    if (diskCache[role] && isTokenValid(diskCache[role])) {
       this.cachedTokens.set(role, diskCache[role]);
       return diskCache[role];
     }

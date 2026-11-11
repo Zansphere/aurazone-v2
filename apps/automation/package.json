@@ -1,0 +1,39 @@
+{
+  "name": "@aurazone/automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AuraZone Unified Automation Framework (Web, Mobile, API)",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:api": "playwright test --project=api",
+    "test:web": "playwright test --project=web-chromium",
+    "test:mobile-viewport": "playwright test --project=mobile-chrome",
+    "test:mobile-native": "playwright test --project=mobile-native",
+    "test:smoke": "playwright test --grep \"@smoke\"",
+    "test:regression": "playwright test --grep \"@regression\"",
+    "test:role-based": "playwright test tests/api/role-based-api.spec.ts",
+    "test:suite-800": "playwright test tests/api/suite-800.spec.ts",
+    "test:db": "playwright test tests/api/database-integrity.spec.ts",
+    "report": "playwright show-report",
+    "allure:generate": "allure generate ./allure-results --clean -o ./allure-report",
+    "allure:open": "allure open ./allure-report",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aurazone/validators": "workspace:*",
+    "@aurazone/utils": "workspace:*",
+    "@faker-js/faker": "^9.0.3",
+    "dotenv": "^16.4.5",
+    "jsonwebtoken": "^9.0.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@aurazone/typescript-config": "workspace:*",
+    "@playwright/test": "^1.48.2",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.7.5",
+    "allure-playwright": "^3.0.4",
+    "typescript": "^5.5.4"
+  }
+}

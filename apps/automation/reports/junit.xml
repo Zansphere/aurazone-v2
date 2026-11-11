@@ -1,6 +1,0 @@
-<testsuites id="" name="" tests="1" failures="0" skipped="0" errors="0" time="1.343378">
-<testsuite name="api\database-integrity.spec.ts" timestamp="2026-11-11T07:23:49.620Z" hostname="api" tests="1" failures="0" skipped="0" time="0.004" errors="0">
-<testcase name="Database Testing: Constraint &amp; Schema Integrity › Loads DB Test Cases from AuraZone_V2_Database_Testing_Sheet.xlsx" classname="api\database-integrity.spec.ts" time="0.004">
-</testcase>
-</testsuite>
-</testsuites>

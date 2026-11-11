@@ -1,8 +1,34 @@
 import jwt from "jsonwebtoken";
+import fs from "fs";
+import path from "path";
 import { type APIRequestContext, type APIResponse } from "@playwright/test";
 import { envConfig } from "../config/env.config.js";
 
 export type UserRole = "PUBLIC" | "CUSTOMER" | "STORE_MANAGER" | "SUPER_ADMIN";
+
+const TOKEN_CACHE_FILE = path.resolve(process.cwd(), ".token-cache.json");
+
+function readDiskTokenCache(): Record<string, string> {
+  try {
+    if (fs.existsSync(TOKEN_CACHE_FILE)) {
+      return JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, "utf8"));
+    }
+  } catch {}
+  return {};
+}
+
+function writeDiskTokenCache(role: string, token: string) {
+  try {
+    const cache = readDiskTokenCache();
+    cache[role] = token;
+    fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2));
+  } catch {}
+}
+
+let cachedSampleProductId: string | null = null;
+let cachedSampleProductSlug: string | null = null;
+let cachedSampleCategoryId: string | null = null;
+let cachedSampleStoreId: string | null = null;
 
 export interface RequestOptions {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -26,12 +52,19 @@ export class ApiClient {
 
   /**
    * Retrieves a real-time server-issued JWT token via live /auth/login.
-   * Falls back to a local signed JWT if the API is offline.
+   * Uses disk caching to prevent hitting Fastify rate-limits across workers.
    */
   public async getRealToken(role: UserRole): Promise<string> {
     if (role === "PUBLIC") return "";
     if (this.cachedTokens.has(role)) {
       return this.cachedTokens.get(role)!;
+    }
+
+    // Check cross-worker disk cache
+    const diskCache = readDiskTokenCache();
+    if (diskCache[role]) {
+      this.cachedTokens.set(role, diskCache[role]);
+      return diskCache[role];
     }
 
     const creds =
@@ -54,6 +87,7 @@ export class ApiClient {
         const serverToken = json?.data?.accessToken;
         if (serverToken) {
           this.cachedTokens.set(role, serverToken);
+          writeDiskTokenCache(role, serverToken);
           return serverToken;
         }
       }
@@ -62,6 +96,30 @@ export class ApiClient {
     }
 
     return this.getFallbackToken(role);
+  }
+
+  /**
+   * Returns an expired JWT token for negative auth testing.
+   */
+  public getExpiredToken(role: UserRole = "CUSTOMER"): string {
+    const payload = {
+      userId: "expired-user-id",
+      email: "expired@aurazone.com",
+      role,
+    };
+    return jwt.sign(payload, envConfig.jwtSecret, { expiresIn: "-1h" });
+  }
+
+  /**
+   * Returns a token for a deleted/suspended user.
+   */
+  public getDeletedUserToken(): string {
+    const payload = {
+      userId: "deleted-user-id",
+      email: "deleted_user@aurazone.com",
+      role: "CUSTOMER",
+    };
+    return jwt.sign(payload, envConfig.jwtSecret, { expiresIn: "1h" });
   }
 
   /**
@@ -100,6 +158,39 @@ export class ApiClient {
   }
 
   /**
+   * Fetches sample product / category IDs to dynamically bind in URL params.
+   */
+  public async ensureSampleData(base: string) {
+    if (cachedSampleProductId && cachedSampleCategoryId && cachedSampleProductSlug && cachedSampleStoreId) return;
+    try {
+      const [prodRes, catRes] = await Promise.all([
+        this.requestContext.get(`${base}/api/v1/products?limit=1`),
+        this.requestContext.get(`${base}/api/v1/categories`),
+      ]);
+
+      if (prodRes.status() === 200) {
+        const json = await prodRes.json();
+        const p = Array.isArray(json?.data) ? json.data[0] : (json?.data?.products?.[0] || json?.data);
+        if (p) {
+          cachedSampleProductId = p.id;
+          cachedSampleProductSlug = p.slug;
+          cachedSampleStoreId = p.storeId;
+          cachedSampleCategoryId = p.categoryId;
+        }
+      }
+
+      if (catRes.status() === 200) {
+        const json = await catRes.json();
+        const cat = Array.isArray(json?.data) ? json.data[0] : (json?.data?.categories?.[0] || json?.data);
+        if (cat) {
+          cachedSampleCategoryId = cat.id;
+          cachedSampleStoreId = cat.storeId;
+        }
+      }
+    } catch {}
+  }
+
+  /**
    * Dispatches an HTTP request with automatic URL normalization, real-time role headers, and error handling.
    */
   public async send(opts: RequestOptions): Promise<APIResponse> {
@@ -108,10 +199,12 @@ export class ApiClient {
 
     // Normalize endpoint (ensure it targets /api/v1 properly)
     let url = opts.endpoint;
+    const base = envConfig.apiUrl.replace(/\/api\/v1$/, "");
+
+    await this.ensureSampleData(base);
+
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
       const cleanPath = url.startsWith("/api/v1") ? url : `/api/v1${url.startsWith("/") ? "" : "/"}${url}`;
-      // Clean base url to avoid duplicate /api/v1
-      const base = envConfig.apiUrl.replace(/\/api\/v1$/, "");
       url = `${base}${cleanPath}`;
     }
 
@@ -134,7 +227,7 @@ export class ApiClient {
         data = { email: envConfig.users.storeManager.email, password: envConfig.users.storeManager.password };
       } else if (d.includes("customer credentials")) {
         data = { email: envConfig.users.customer.email, password: envConfig.users.customer.password };
-      } else if (d.includes("invalid") && (d.includes("credential") || d.includes("sm") || d.includes("admin") || d.includes("password"))) {
+      } else if (d.includes("wrong password") || (d.includes("invalid") && (d.includes("credential") || d.includes("sm") || d.includes("admin") || d.includes("password")))) {
         data = { email: "wrong@aurazone.com", password: "InvalidPassword123!" };
       } else if (d.includes("empty password")) {
         data = { email: "admin@aurazone.com", password: "" };
@@ -148,11 +241,21 @@ export class ApiClient {
         data = { email: `admin_${Date.now()}@aurazone.com`, password: "Admin@123", role: "SUPER_ADMIN", fullName: "New Super Admin" };
       } else if (d.includes("valid product") || d.includes("valid data")) {
         data = {
-          name: `Test Product ${Date.now()}`,
+          name: `Auto Product ${Date.now()}`,
           description: "Automated test product description",
-          price: 199.99,
-          stock: 50,
-          categoryId: "test-category",
+          storeId: cachedSampleStoreId || "e14dc1c9-cbcf-44bf-b3b0-61e93e60b531",
+          categoryId: cachedSampleCategoryId || "58ef362b-0ca1-423a-bc8e-d9a65a00f1c1",
+          hasVariants: true,
+          isActive: true,
+          variants: [
+            {
+              sku: `SKU-${Date.now()}`,
+              price: 199.99,
+              quantity: 50,
+              isAvailable: true,
+              attributes: [],
+            },
+          ],
         };
       } else {
         try {
@@ -163,7 +266,33 @@ export class ApiClient {
       }
     }
 
-    // Resolve URL placeholders
+    // Normalize admin product creation payload to match AuraZone v2 productSchema
+    if (url.includes("/admin/products") && opts.method === "POST" && data && typeof data === "object") {
+      data.name = `${data.name || "Product"} ${Date.now()}`;
+      data.storeId = "e14dc1c9-cbcf-44bf-b3b0-61e93e60b531"; // Aura Shoes (managed by Store Manager)
+      data.categoryId = "58ef362b-0ca1-423a-bc8e-d9a65a00f1c1"; // Sneakers category
+      if (!data.description) data.description = "Automated test product description";
+      if (!data.variants || data.variants.length === 0) {
+        data.hasVariants = true;
+        data.variants = [
+          {
+            sku: `SKU-${Date.now()}`,
+            price: Number(data.price) || 199.99,
+            quantity: Number(data.stock) || 50,
+            isAvailable: true,
+            attributes: [],
+          },
+        ];
+      }
+    }
+
+    // Resolve URL placeholders dynamically
+    if (url.includes("{id}")) {
+      const replacement = url.includes("/products/")
+        ? (cachedSampleProductSlug || cachedSampleProductId || "00000000-0000-0000-0000-000000000001")
+        : (cachedSampleProductId || "00000000-0000-0000-0000-000000000001");
+      url = url.replace("{id}", replacement);
+    }
     if (url.includes("{otherId}")) {
       url = url.replace("{otherId}", "00000000-0000-0000-0000-000000000002");
     }
@@ -175,6 +304,9 @@ export class ApiClient {
     }
     if (url.includes("{ownId}")) {
       url = url.replace("{ownId}", "543b9c2f-3aa9-437a-991a-e02820687c91");
+    }
+    if (url.includes("{draftId}")) {
+      url = url.replace("{draftId}", "00000000-0000-0000-0000-000000000099");
     }
 
     const requestOptions: any = {
@@ -222,4 +354,5 @@ export class ApiClient {
     return this.send({ method: "DELETE", endpoint, data });
   }
 }
+
 

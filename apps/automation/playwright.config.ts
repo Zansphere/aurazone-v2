@@ -30,6 +30,8 @@ export default defineConfig({
     {
       name: "api",
       testDir: "./tests/api",
+      fullyParallel: false,
+      workers: 1,
       use: {
         baseURL: envConfig.apiUrl,
       },
@@ -64,3 +66,4 @@ export default defineConfig({
     },
   ],
 });
+

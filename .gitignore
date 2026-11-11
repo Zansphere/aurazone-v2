@@ -42,3 +42,4 @@ yarn-error.log*
 apps/automation/reports/
 apps/automation/allure-results/
 apps/automation/test-results/
+apps/automation/.token-cache.json

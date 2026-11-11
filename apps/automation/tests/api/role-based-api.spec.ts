@@ -34,9 +34,12 @@ for (const { sheet, role } of rolesToTest) {
         },
         async ({ publicApi, customerApi, storeManagerApi, superAdminApi }) => {
           let client = publicApi;
-          if (role === "CUSTOMER") client = customerApi;
-          else if (role === "STORE_MANAGER") client = storeManagerApi;
-          else if (role === "SUPER_ADMIN") client = superAdminApi;
+          const isNoAuth = tc.authHeader?.toLowerCase() === "none" || tc.endpoint.includes("/auth/login");
+          if (!isNoAuth) {
+            if (role === "CUSTOMER") client = customerApi;
+            else if (role === "STORE_MANAGER") client = storeManagerApi;
+            else if (role === "SUPER_ADMIN") client = superAdminApi;
+          }
 
           // Dispatch request defined in your sheet
           const res = await client.send({
@@ -57,3 +60,4 @@ for (const { sheet, role } of rolesToTest) {
     }
   });
 }
+

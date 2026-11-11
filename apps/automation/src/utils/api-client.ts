@@ -25,30 +25,66 @@ export class ApiClient {
   }
 
   /**
-   * Generates or retrieves a valid JWT token for the specified role.
+   * Retrieves a real-time server-issued JWT token via live /auth/login.
+   * Falls back to a local signed JWT if the API is offline.
    */
-  public getToken(role: UserRole): string {
+  public async getRealToken(role: UserRole): Promise<string> {
     if (role === "PUBLIC") return "";
     if (this.cachedTokens.has(role)) {
       return this.cachedTokens.get(role)!;
     }
 
+    const creds =
+      role === "SUPER_ADMIN"
+        ? envConfig.users.superAdmin
+        : role === "STORE_MANAGER"
+        ? envConfig.users.storeManager
+        : envConfig.users.customer;
+
+    try {
+      const base = envConfig.apiUrl.replace(/\/api\/v1$/, "");
+      const loginUrl = `${base}/api/v1/auth/login`;
+      const res = await this.requestContext.post(loginUrl, {
+        data: { email: creds.email, password: creds.password },
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (res.status() === 200) {
+        const json = await res.json();
+        const serverToken = json?.data?.accessToken;
+        if (serverToken) {
+          this.cachedTokens.set(role, serverToken);
+          return serverToken;
+        }
+      }
+    } catch {
+      // Live server unreachable, continue to fallback
+    }
+
+    return this.getFallbackToken(role);
+  }
+
+  /**
+   * Generates a signed fallback JWT token for offline tests.
+   */
+  public getFallbackToken(role: UserRole): string {
+    if (role === "PUBLIC") return "";
     let payload: { userId: string; email: string; role: string };
     if (role === "SUPER_ADMIN") {
       payload = {
-        userId: "admin-test-id",
+        userId: "543b9c2f-3aa9-437a-991a-e02820687c91",
         email: envConfig.users.superAdmin.email,
         role: "SUPER_ADMIN",
       };
     } else if (role === "STORE_MANAGER") {
       payload = {
-        userId: "manager-test-id",
+        userId: "6a2a4bc7-8e11-4f64-b628-30fdbc360dd0",
         email: envConfig.users.storeManager.email,
         role: "STORE_MANAGER",
       };
     } else {
       payload = {
-        userId: "customer-test-id",
+        userId: "e981a2ac-7b3d-42ab-ae46-69b111929446",
         email: envConfig.users.customer.email,
         role: "CUSTOMER",
       };
@@ -59,12 +95,16 @@ export class ApiClient {
     return token;
   }
 
+  public getToken(role: UserRole): string {
+    return this.cachedTokens.get(role) || this.getFallbackToken(role);
+  }
+
   /**
-   * Dispatches an HTTP request with automatic URL normalization, role headers, and error handling.
+   * Dispatches an HTTP request with automatic URL normalization, real-time role headers, and error handling.
    */
   public async send(opts: RequestOptions): Promise<APIResponse> {
     const role = opts.role || this.defaultRole;
-    const token = opts.token || this.getToken(role);
+    const token = opts.token !== undefined ? opts.token : await this.getRealToken(role);
 
     // Normalize endpoint (ensure it targets /api/v1 properly)
     let url = opts.endpoint;
@@ -84,11 +124,57 @@ export class ApiClient {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
+    // Resolve data strings into structured payloads
     let data = opts.data;
     if (typeof data === "string" && data.trim()) {
-      try {
-        data = JSON.parse(data);
-      } catch {}
+      const d = data.toLowerCase();
+      if (d.includes("super admin credentials")) {
+        data = { email: envConfig.users.superAdmin.email, password: envConfig.users.superAdmin.password };
+      } else if (d.includes("store manager credentials")) {
+        data = { email: envConfig.users.storeManager.email, password: envConfig.users.storeManager.password };
+      } else if (d.includes("customer credentials")) {
+        data = { email: envConfig.users.customer.email, password: envConfig.users.customer.password };
+      } else if (d.includes("invalid") && (d.includes("credential") || d.includes("sm") || d.includes("admin") || d.includes("password"))) {
+        data = { email: "wrong@aurazone.com", password: "InvalidPassword123!" };
+      } else if (d.includes("empty password")) {
+        data = { email: "admin@aurazone.com", password: "" };
+      } else if (d.includes("empty body")) {
+        data = {};
+      } else if (d.includes("duplicate email")) {
+        data = { email: envConfig.users.superAdmin.email, password: "NewPassword123!", role: "STORE_MANAGER", fullName: "Duplicate User" };
+      } else if (d.includes("create store manager")) {
+        data = { email: `manager_${Date.now()}@aurazone.com`, password: "Manager@123", role: "STORE_MANAGER", fullName: "New Manager" };
+      } else if (d.includes("create another super admin")) {
+        data = { email: `admin_${Date.now()}@aurazone.com`, password: "Admin@123", role: "SUPER_ADMIN", fullName: "New Super Admin" };
+      } else if (d.includes("valid product") || d.includes("valid data")) {
+        data = {
+          name: `Test Product ${Date.now()}`,
+          description: "Automated test product description",
+          price: 199.99,
+          stock: 50,
+          categoryId: "test-category",
+        };
+      } else {
+        try {
+          data = JSON.parse(data);
+        } catch {
+          // Keep as string if not JSON
+        }
+      }
+    }
+
+    // Resolve URL placeholders
+    if (url.includes("{otherId}")) {
+      url = url.replace("{otherId}", "00000000-0000-0000-0000-000000000002");
+    }
+    if (url.includes("{unknownId}")) {
+      url = url.replace("{unknownId}", "00000000-0000-0000-0000-000000000000");
+    }
+    if (url.includes("{itemId}")) {
+      url = url.replace("{itemId}", "00000000-0000-0000-0000-000000000000");
+    }
+    if (url.includes("{ownId}")) {
+      url = url.replace("{ownId}", "543b9c2f-3aa9-437a-991a-e02820687c91");
     }
 
     const requestOptions: any = {
@@ -136,3 +222,4 @@ export class ApiClient {
     return this.send({ method: "DELETE", endpoint, data });
   }
 }
+

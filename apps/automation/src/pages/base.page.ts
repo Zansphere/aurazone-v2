@@ -41,3 +41,4 @@ export abstract class BasePage {
     return this.page.locator(`[data-testid="${id}"]`);
   }
 }
+

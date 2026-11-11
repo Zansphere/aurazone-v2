@@ -13,28 +13,28 @@ export const envConfig = {
   env: process.env.TEST_ENV || "local",
   
   // Base Service URLs
-  apiUrl: process.env.TEST_API_URL || "http://localhost:5000/api/v1",
-  webUrl: process.env.TEST_WEB_URL || "http://localhost:3000",
-  adminWebUrl: process.env.TEST_ADMIN_URL || "http://localhost:3001",
+  apiUrl: process.env.TEST_API_URL || `http://localhost:${process.env.PORT || 4000}/api/v1`,
+  webUrl: process.env.TEST_WEB_URL || process.env.CUSTOMER_URL || "http://localhost:3000",
+  adminWebUrl: process.env.TEST_ADMIN_URL || process.env.ADMIN_URL || "http://localhost:3001",
 
   // Authentication secrets
-  jwtSecret: process.env.JWT_SECRET || "aurazone-super-secret-key-for-development-only-change-in-production-2024",
+  jwtSecret: process.env.JWT_SECRET || process.env.ACCESS_TOKEN_SECRET || "dev-jwt-secret-change-in-production-aurazone-v2",
 
-  // Test credentials
+  // Test credentials (matching seeded database records)
   users: {
     superAdmin: {
-      email: process.env.TEST_ADMIN_EMAIL || "superadmin@aurazone.com",
-      password: process.env.TEST_ADMIN_PASSWORD || "Admin@123456",
+      email: process.env.TEST_ADMIN_EMAIL || "admin@aurazone.com",
+      password: process.env.TEST_ADMIN_PASSWORD || "Admin@123",
       role: "SUPER_ADMIN",
     },
     storeManager: {
       email: process.env.TEST_MANAGER_EMAIL || "manager@aurazone.com",
-      password: process.env.TEST_MANAGER_PASSWORD || "Manager@123456",
+      password: process.env.TEST_MANAGER_PASSWORD || "Admin@123",
       role: "STORE_MANAGER",
     },
     customer: {
-      email: process.env.TEST_CUSTOMER_EMAIL || "customer@aurazone.com",
-      password: process.env.TEST_CUSTOMER_PASSWORD || "Customer@123456",
+      email: process.env.TEST_CUSTOMER_EMAIL || "arjun.patel@example.com",
+      password: process.env.TEST_CUSTOMER_PASSWORD || "Customer@123",
       role: "CUSTOMER",
     },
   },
@@ -60,3 +60,4 @@ export const envConfig = {
     databaseTesting: path.resolve(__dirname, "../../fixtures/sheets/AuraZone_V2_Database_Testing_Sheet.xlsx"),
   },
 };
+

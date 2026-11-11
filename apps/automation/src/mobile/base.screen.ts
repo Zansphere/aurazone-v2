@@ -21,3 +21,4 @@ export abstract class BaseScreen {
     return `android=new UiSelector().resourceId("${id}")`;
   }
 }
+

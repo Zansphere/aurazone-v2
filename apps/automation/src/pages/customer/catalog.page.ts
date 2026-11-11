@@ -31,3 +31,4 @@ export class CatalogPage extends BasePage {
     await addToCartBtn.click();
   }
 }
+

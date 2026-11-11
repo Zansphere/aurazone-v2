@@ -42,3 +42,4 @@ export class AppiumDriverManager {
     return `http://${envConfig.mobile.appiumHost}:${envConfig.mobile.appiumPort}`;
   }
 }
+

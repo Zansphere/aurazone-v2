@@ -21,3 +21,4 @@ test.describe("Mobile Native: Flutter Admin App (Android)", () => {
     expect(loginScreen.errorMessage).toBe("~text_error_message");
   });
 });
+

@@ -54,3 +54,4 @@ export class CheckoutPage extends BasePage {
     await this.page.waitForURL("**/order-confirmation**", { timeout: 15000 });
   }
 }
+

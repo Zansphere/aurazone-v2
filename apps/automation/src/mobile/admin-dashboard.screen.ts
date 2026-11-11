@@ -10,3 +10,4 @@ export class AdminDashboardScreen extends BaseScreen {
   readonly orderCards = BaseScreen.accessibilityId("card_order_item");
   readonly lowStockBadge = BaseScreen.accessibilityId("badge_low_stock");
 }
+

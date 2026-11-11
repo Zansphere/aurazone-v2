@@ -29,3 +29,4 @@ export class CartPage extends BasePage {
     await this.page.waitForURL("**/checkout");
   }
 }
+

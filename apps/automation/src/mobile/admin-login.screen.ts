@@ -12,3 +12,4 @@ export class AdminLoginScreen extends BaseScreen {
   readonly passwordFallback = BaseScreen.androidText("Password");
   readonly loginBtnFallback = BaseScreen.androidText("Sign In");
 }
+

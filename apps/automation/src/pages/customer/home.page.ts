@@ -25,3 +25,4 @@ export class HomePage extends BasePage {
     await this.page.waitForURL("**/cart");
   }
 }
+

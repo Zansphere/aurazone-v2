@@ -20,13 +20,13 @@ export class TestDataGenerator {
    */
   public static generateAddress() {
     return {
-      name: faker.person.fullName(),
-      phone: `+91${faker.string.numeric(10)}`,
-      addressLine1: faker.location.streetAddress(),
-      addressLine2: faker.location.secondaryAddress(),
-      city: faker.location.city(),
-      state: faker.location.state(),
-      postalCode: faker.location.zipCode("######"),
+      name: `${faker.person.firstName()} ${faker.person.lastName()}`,
+      phone: `98${faker.string.numeric(8)}`,
+      addressLine1: "123 MG Road, Suite 400",
+      addressLine2: "Near Metro Station",
+      city: "Mumbai",
+      state: "Maharashtra",
+      postalCode: "400001",
       country: "India",
     };
   }

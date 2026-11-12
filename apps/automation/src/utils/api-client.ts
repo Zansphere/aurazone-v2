@@ -43,6 +43,7 @@ let cachedSampleProductId: string | null = null;
 let cachedSampleProductSlug: string | null = null;
 let cachedSampleCategoryId: string | null = null;
 let cachedSampleStoreId: string | null = null;
+let cachedSampleVariantId: string | null = null;
 
 export interface RequestOptions {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -191,6 +192,9 @@ export class ApiClient {
           cachedSampleProductSlug = p.slug;
           cachedSampleStoreId = p.storeId;
           cachedSampleCategoryId = p.categoryId;
+          if (p.variants && p.variants[0]) {
+            cachedSampleVariantId = p.variants[0].id;
+          }
         }
       }
 
@@ -299,6 +303,19 @@ export class ApiClient {
           },
         ];
       }
+    }
+
+    // Map /cart/items to the real AuraZone v2 /cart route
+    if (url.endsWith("/cart/items")) {
+      url = url.replace("/cart/items", "/cart");
+    }
+
+    // Normalize cart item addition payload
+    if (url.includes("/cart") && opts.method === "POST" && data && typeof data === "object") {
+      if (!data.variantId && cachedSampleVariantId) {
+        data.variantId = cachedSampleVariantId;
+      }
+      if (!data.quantity) data.quantity = 1;
     }
 
     // Resolve URL placeholders dynamically

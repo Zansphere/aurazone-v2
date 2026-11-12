@@ -55,6 +55,16 @@ newman.run(
     }
     const failures = summary.run.failures.length;
     console.log(`[Newman Runner] Completed. Total requests: ${summary.run.stats.requests.total}, Failures: ${failures}`);
+    if (failures > 0) {
+      console.log(`\n================== DETAILED FAILURES (${failures}) ==================`);
+      summary.run.failures.forEach((f, idx) => {
+        const item = f.source ? f.source.name : (f.parent ? f.parent.name : "Unknown");
+        console.log(`[Fail ${idx + 1}] Request: "${item}"`);
+        console.log(`  Assertion: ${f.error.test || f.error.name}`);
+        console.log(`  Message:   ${f.error.message}`);
+      });
+      console.log(`===================================================================\n`);
+    }
     process.exit(failures > 0 ? 1 : 0);
   }
 );

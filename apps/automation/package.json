@@ -7,6 +7,7 @@
   "scripts": {
     "test": "playwright test",
     "test:api": "playwright test --project=api",
+    "test:api:admin": "node src/runners/run-admin-collection.js",
     "test:web": "playwright test --project=web-chromium",
     "test:mobile-viewport": "playwright test --project=mobile-chrome",
     "test:mobile-native": "playwright test --project=mobile-native",
@@ -21,8 +22,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@aurazone/validators": "workspace:*",
     "@aurazone/utils": "workspace:*",
+    "@aurazone/validators": "workspace:*",
     "@faker-js/faker": "^9.0.3",
     "dotenv": "^16.4.5",
     "jsonwebtoken": "^9.0.2",
@@ -32,8 +33,10 @@
     "@aurazone/typescript-config": "workspace:*",
     "@playwright/test": "^1.48.2",
     "@types/jsonwebtoken": "^9.0.7",
+    "@types/newman": "^5.3.6",
     "@types/node": "^22.7.5",
     "allure-playwright": "^3.0.4",
+    "newman": "^6.2.3",
     "typescript": "^5.5.4"
   }
 }

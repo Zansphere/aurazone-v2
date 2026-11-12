@@ -15,6 +15,7 @@
     "db:studio": "dotenv -e .env -- pnpm --filter @aurazone/database db:studio",
     "test:e2e": "pnpm --filter @aurazone/automation test",
     "test:e2e:api": "pnpm --filter @aurazone/automation test:api",
+    "test:e2e:api:admin": "pnpm --filter @aurazone/automation test:api:admin",
     "test:e2e:web": "pnpm --filter @aurazone/automation test:web",
     "test:e2e:mobile": "pnpm --filter @aurazone/automation test:mobile-native",
     "test:e2e:report": "pnpm --filter @aurazone/automation report"

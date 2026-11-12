@@ -44,6 +44,8 @@ let cachedSampleProductSlug: string | null = null;
 let cachedSampleCategoryId: string | null = null;
 let cachedSampleStoreId: string | null = null;
 let cachedSampleVariantId: string | null = null;
+let cachedSampleOrderId: string | null = "b357581c-8b45-4fd5-bc2a-479bd875ff59";
+let cachedSampleCartItemId: string | null = null;
 
 export interface RequestOptions {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -146,19 +148,19 @@ export class ApiClient {
     let payload: { userId: string; email: string; role: string };
     if (role === "SUPER_ADMIN") {
       payload = {
-        userId: "543b9c2f-3aa9-437a-991a-e02820687c91",
+        userId: "4beca3a6-04c0-4b93-9514-1d5a7b922c46",
         email: envConfig.users.superAdmin.email,
         role: "SUPER_ADMIN",
       };
     } else if (role === "STORE_MANAGER") {
       payload = {
-        userId: "6a2a4bc7-8e11-4f64-b628-30fdbc360dd0",
+        userId: "63d3a771-25a6-4a2e-8a18-e890e1c7ffac",
         email: envConfig.users.storeManager.email,
         role: "STORE_MANAGER",
       };
     } else {
       payload = {
-        userId: "e981a2ac-7b3d-42ab-ae46-69b111929446",
+        userId: "b1c76037-cd4a-42f7-82d7-1d66f60d5aba",
         email: envConfig.users.customer.email,
         role: "CUSTOMER",
       };
@@ -206,6 +208,22 @@ export class ApiClient {
           cachedSampleStoreId = cat.storeId;
         }
       }
+
+      // Ensure customer cart has at least 1 item for item-level actions
+      if (!cachedSampleCartItemId && cachedSampleVariantId) {
+        const cartToken = this.getFallbackToken("CUSTOMER");
+        const cartRes = await this.requestContext.post(`${base}/api/v1/cart`, {
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${cartToken}` },
+          data: { variantId: cachedSampleVariantId, quantity: 1 },
+        });
+        if (cartRes.status() === 200 || cartRes.status() === 201) {
+          const cartJson = await cartRes.json();
+          const items = cartJson?.data?.items;
+          if (items && items[0]) {
+            cachedSampleCartItemId = items[0].id;
+          }
+        }
+      }
     } catch {}
   }
 
@@ -218,6 +236,13 @@ export class ApiClient {
 
     // Normalize endpoint (ensure it targets /api/v1 properly)
     let url = opts.endpoint;
+    if (url.includes(",")) {
+      const parts = url.split(",").map((p) => p.trim());
+      url = parts.find((p) => p.includes("/orders")) || parts[0];
+    }
+    if (url.includes("|")) {
+      url = url.split("|")[0].trim();
+    }
     const base = envConfig.apiUrl.replace(/\/api\/v1$/, "");
 
     await this.ensureSampleData(base);
@@ -244,10 +269,47 @@ export class ApiClient {
         data = { email: envConfig.users.superAdmin.email, password: envConfig.users.superAdmin.password };
       } else if (d.includes("store manager credentials")) {
         data = { email: envConfig.users.storeManager.email, password: envConfig.users.storeManager.password };
-      } else if (d.includes("customer credentials")) {
+      } else if (
+        d.includes("customer credentials") ||
+        (d.includes("valid") && url.includes("/login")) ||
+        (d.includes("user@") && url.includes("/login")) ||
+        (d.includes("case-insensitive") && url.includes("/login"))
+      ) {
         data = { email: envConfig.users.customer.email, password: envConfig.users.customer.password };
+      } else if (url.includes("/signup") && (d.includes("duplicate email") || d.includes("existing email"))) {
+        data = {
+          email: "arjun.patel@example.com",
+          password: "Customer@123",
+          fullName: "Arjun Patel",
+        };
+      } else if (url.includes("/signup") && (d.includes("invalid") || d.includes("missing"))) {
+        data = { email: "not-an-email", password: "" };
+      } else if (url.includes("/signup") && d.includes("html")) {
+        data = {
+          email: `script_cust_${Date.now()}@aurazone-test.com`,
+          password: "TestPassword123!",
+          fullName: "<script>alert('xss')</script>",
+        };
+      } else if (url.includes("/signup") && d.includes("emoji")) {
+        data = {
+          email: `emoji_cust_${Date.now()}@aurazone-test.com`,
+          password: "TestPassword123!",
+          fullName: "Customer 🎉 " + "A".repeat(50),
+        };
+      } else if (url.includes("/signup") && d.includes("body >")) {
+        data = { email: "large@test.com", password: "Password123!", payload: "x".repeat(1024 * 1024 * 2) };
+      } else if (url.includes("/signup") && (d.includes("valid") || d.includes("new@x.com") || d.includes("sam"))) {
+        data = {
+          email: `auto_cust_${Date.now()}_${Math.floor(Math.random() * 10000)}@aurazone-test.com`,
+          password: "TestPassword123!",
+          fullName: "Auto Test Customer",
+        };
+      } else if (url.includes("/users/profile") && (d.includes("501") || d.includes("name=\"\""))) {
+        data = { fullName: "" };
+      } else if (url.includes("/cart") && (d.includes("same product") || d.includes("twice") || d.includes("50 products") || d.includes("parallel"))) {
+        data = { variantId: cachedSampleVariantId, quantity: 1 };
       } else if (d.includes("wrong password") || (d.includes("invalid") && (d.includes("credential") || d.includes("sm") || d.includes("admin") || d.includes("password")))) {
-        data = { email: "wrong@aurazone.com", password: "InvalidPassword123!" };
+        data = { email: `wrong_${Date.now()}@aurazone-nonexistent.com`, password: "DefinitelyWrongPassword123!" };
       } else if (d.includes("empty password")) {
         data = { email: "admin@aurazone.com", password: "" };
       } else if (d.includes("empty body")) {
@@ -279,6 +341,9 @@ export class ApiClient {
       } else {
         try {
           data = JSON.parse(data);
+          if (url.includes("/signup") && data.email === "new@x.com") {
+            data.email = `auto_cust_${Date.now()}_${Math.floor(Math.random() * 10000)}@aurazone-test.com`;
+          }
         } catch {
           // Keep as string if not JSON
         }
@@ -306,7 +371,7 @@ export class ApiClient {
     }
 
     // Map /cart/items to the real AuraZone v2 /cart route
-    if (url.endsWith("/cart/items")) {
+    if (url.includes("/cart/items")) {
       url = url.replace("/cart/items", "/cart");
     }
 
@@ -318,11 +383,35 @@ export class ApiClient {
       if (!data.quantity) data.quantity = 1;
     }
 
+    // Normalize cart item update payload
+    if (url.includes("/cart") && (opts.method === "PATCH" || opts.method === "PUT") && data && typeof data === "object") {
+      if (!data.quantity) data.quantity = 2;
+    }
+
+    // Normalize order creation payload
+    if (url.endsWith("/orders") && opts.method === "POST" && (!data || typeof data === "string" || !data.paymentMethod)) {
+      data = {
+        paymentMethod: "COD",
+        address: {
+          name: "Arjun Patel",
+          phone: "9876543210",
+          addressLine1: "123 MG Road",
+          city: "Mumbai",
+          state: "Maharashtra",
+          postalCode: "400001",
+          country: "India",
+        },
+      };
+    }
+
     // Resolve URL placeholders dynamically
     if (url.includes("{id}")) {
-      const replacement = url.includes("/products/")
-        ? (cachedSampleProductSlug || cachedSampleProductId || "00000000-0000-0000-0000-000000000001")
-        : (cachedSampleProductId || "00000000-0000-0000-0000-000000000001");
+      let replacement = cachedSampleProductId || "00000000-0000-0000-0000-000000000001";
+      if (url.includes("/products/")) {
+        replacement = cachedSampleProductSlug || cachedSampleProductId || "00000000-0000-0000-0000-000000000001";
+      } else if (url.includes("/orders/")) {
+        replacement = cachedSampleOrderId || "b357581c-8b45-4fd5-bc2a-479bd875ff59";
+      }
       url = url.replace("{id}", replacement);
     }
     if (url.includes("{otherId}")) {
@@ -332,7 +421,7 @@ export class ApiClient {
       url = url.replace("{unknownId}", "00000000-0000-0000-0000-000000000000");
     }
     if (url.includes("{itemId}")) {
-      url = url.replace("{itemId}", "00000000-0000-0000-0000-000000000000");
+      url = url.replace("{itemId}", cachedSampleCartItemId || "00000000-0000-0000-0000-000000000000");
     }
     if (url.includes("{ownId}")) {
       url = url.replace("{ownId}", "543b9c2f-3aa9-437a-991a-e02820687c91");

@@ -17,6 +17,7 @@ export interface RoleBasedTestCase {
   requestData: string;
   steps: string;
   expectedStatus: number;
+  expectedStatuses: number[];
   expectedResult: string;
   masterTcRef?: string;
   automation: string;
@@ -79,7 +80,11 @@ export function loadRoleBasedCases(sheetName: string): RoleBasedTestCase[] {
     if (!id || typeof id !== "string" || !id.startsWith("API-")) continue;
 
     const rawStatus = String(row["Expected Status"] || "200").trim();
-    const parsedStatus = parseInt(rawStatus.split(/[\s/]/)[0], 10) || 200;
+    const parsedStatuses = rawStatus
+      .split(/[\s/,|]+/)
+      .map((s) => parseInt(s, 10))
+      .filter((n) => !isNaN(n) && n >= 100 && n < 600);
+    const parsedStatus = parsedStatuses[0] || 200;
 
     const rawMethod = String(row["HTTP Method"] || "GET").trim().toUpperCase();
     const method = ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(rawMethod)
@@ -107,6 +112,7 @@ export function loadRoleBasedCases(sheetName: string): RoleBasedTestCase[] {
       requestData: row["Request Data / Test Data"] || "",
       steps: row["Test Steps"] || "",
       expectedStatus: parsedStatus,
+      expectedStatuses: parsedStatuses.length > 0 ? parsedStatuses : [parsedStatus],
       expectedResult: row["Expected Result"] || "",
       masterTcRef: row["Master TC Ref"] || "",
       automation: row["Automation"] || "Yes",
